@@ -109,7 +109,7 @@ model DailyFoodEligibility {
 
   foodList DailyFoodList @relation(fields: [date], references: [date], onDelete: Cascade)
   student  Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  project  Project       @relation(fields: [projectCode], references: [code])
+  project  Project       @relation(fields: [projectCode], references: [code], onDelete: Cascade)
 
   // Critical rule: A student can only be listed once for a specific date
   @@unique([date, studentId])
@@ -126,16 +126,17 @@ model FoodToken {
   date        String   // "YYYY-MM-DD"
   studentId   String
   projectCode String
+  session     String   @default("LUNCH") // "BREAKFAST" | "LUNCH" | "DINNER"
   status      String   @default("Generated") // Simple status
   issuedAt    DateTime @default(now())
   issuedById  String
 
   student  Student   @relation(fields: [studentId], references: [id])
-  project  Project   @relation(fields: [projectCode], references: [code])
+  project  Project   @relation(fields: [projectCode], references: [code], onDelete: Cascade)
   issuedBy StaffUser @relation("IssuedTokens", fields: [issuedById], references: [id])
 
-  // Strict constraint: Only 1 token per student per day
-  @@unique([date, studentId])
+  // Strict constraint: Only 1 token per student per meal session per day
+  @@unique([date, studentId, session])
   @@index([date])
   @@map("food_tokens")
 }

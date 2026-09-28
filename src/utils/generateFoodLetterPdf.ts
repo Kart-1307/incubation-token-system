@@ -174,7 +174,7 @@ export function generateFoodRequestLetterPdf(
     margin: { left: tableMarginX, right: tableMarginX },
     tableWidth: 140,
     styles: {
-      font: 'times',
+      font: 'helvetica',
       fontSize: 9.5,
       textColor: [30, 41, 59],
       cellPadding: 2.2, // Low height per row so 20 names fit comfortably
@@ -186,14 +186,15 @@ export function generateFoodRequestLetterPdf(
       fillColor: [49, 46, 129], // Indigo 900
       textColor: [255, 255, 255],
       fontStyle: 'bold',
+      font: 'helvetica',
       halign: 'center',
       cellPadding: 2.8,
       fontSize: 10,
     },
     columnStyles: {
-      0: { cellWidth: 16, halign: 'center' },
-      1: { cellWidth: 80, halign: 'left' },
-      2: { cellWidth: 44, halign: 'center', fontStyle: 'bold' },
+      0: { cellWidth: 16, halign: 'center', font: 'helvetica' },
+      1: { cellWidth: 80, halign: 'left', font: 'helvetica' },
+      2: { cellWidth: 44, halign: 'center', fontStyle: 'bold', font: 'helvetica' },
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],

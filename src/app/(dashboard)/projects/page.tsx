@@ -46,17 +46,17 @@ export default function Projects() {
       ]);
       setProjectList(projects);
       setStudentRegistry(students);
-      if (selected) {
-        const refreshed = projects.find(p => p.code === selected.code);
-        if (refreshed) setSelected(refreshed);
-      }
+      setSelected(prev => {
+        if (!prev) return null;
+        return projects.find(p => p.code === prev.code) || prev;
+      });
     } catch (e) {
       console.error(e);
       showToast('Error loading projects.');
     } finally {
       setLoading(false);
     }
-  }, [selected]);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -126,7 +126,7 @@ export default function Projects() {
     return (
       <div className="space-y-6">
         <button
-          onClick={() => setView('list')}
+          onClick={() => { setView('list'); setSelected(null); }}
           className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer flex items-center gap-1 font-medium"
         >
           ← Back to Projects

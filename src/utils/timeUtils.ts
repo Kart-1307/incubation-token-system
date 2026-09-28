@@ -19,6 +19,17 @@ export function getMealSession(dateObj: Date = new Date()): MealSession {
   }
 }
 
+export function getTokenEffectiveSession(token: { session?: string | null; issuedAt?: Date | string }): MealSession {
+  const timeBased = getMealSession(token?.issuedAt ? new Date(token.issuedAt) : new Date());
+  if (token?.session && ['BREAKFAST', 'LUNCH', 'DINNER'].includes(token.session.toUpperCase())) {
+    if (token.session.toUpperCase() === 'LUNCH' && timeBased === 'BREAKFAST') {
+      return 'BREAKFAST';
+    }
+    return token.session.toUpperCase() as MealSession;
+  }
+  return timeBased;
+}
+
 /**
  * Generate friendly guidance message when a student tries to request a token
  * after already receiving one for a specific meal session.

@@ -155,20 +155,20 @@ export default function FoodRequestLetterModal({
           </div>
 
           {/* Compact Centered 3-Column Table: fits 20+ students comfortably */}
-          <table className="max-w-xl mx-auto w-full text-xs font-serif border-collapse border border-slate-400">
+          <table className="max-w-xl mx-auto w-full text-xs font-sans border-collapse border border-slate-400">
             <thead>
               <tr className="bg-slate-100 border-b border-slate-400 text-slate-900">
                 <th className="border border-slate-400 px-3 py-1.5 w-14 text-center font-bold">S.No</th>
                 <th className="border border-slate-400 px-4 py-1.5 text-left font-bold">Student Name</th>
-                <th className="border border-slate-400 px-4 py-1.5 w-40 text-center font-bold">Student ID</th>
+                <th className="border border-slate-400 px-4 py-1.5 w-44 text-center font-bold">Student ID</th>
               </tr>
             </thead>
             <tbody>
               {studentsList.map((st, idx) => (
                 <tr key={st.studentId} className="border-b border-slate-300">
-                  <td className="border border-slate-400 px-3 py-1.5 text-center text-slate-600">{idx + 1}</td>
+                  <td className="border border-slate-400 px-3 py-1.5 text-center text-slate-600 font-medium">{idx + 1}</td>
                   <td className="border border-slate-400 px-4 py-1.5 font-medium text-slate-800">{st.name}</td>
-                  <td className="border border-slate-400 px-4 py-1.5 text-center font-semibold text-slate-900 tracking-wide">
+                  <td className="border border-slate-400 px-4 py-1.5 text-center font-bold text-slate-900 font-sans tracking-wider text-[11px]">
                     {st.studentId}
                   </td>
                 </tr>
@@ -459,25 +459,25 @@ export default function FoodRequestLetterModal({
 
                 {/* Compact, centered 3-column table: low height & width so 20 names fit comfortably */}
                 <div className="max-w-xl mx-auto border border-slate-300 rounded overflow-hidden my-3">
-                  <table className="w-full text-xs font-serif border-collapse">
+                  <table className="w-full text-xs font-sans border-collapse">
                     <thead>
                       <tr className="bg-indigo-900 text-white">
                         <th className="py-2 px-3 w-14 text-center font-bold border-r border-indigo-800">S.No</th>
                         <th className="py-2 px-4 text-left font-bold border-r border-indigo-800">Student Name</th>
-                        <th className="py-2 px-4 w-40 text-center font-bold">Student ID</th>
+                        <th className="py-2 px-4 w-44 text-center font-bold">Student ID</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {studentsList.length > 0 ? (
                         studentsList.map((st, idx) => (
                           <tr key={st.studentId} className={idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
-                            <td className="py-1.5 px-3 text-center text-slate-500 border-r border-slate-200">
+                            <td className="py-1.5 px-3 text-center text-slate-500 border-r border-slate-200 font-medium">
                               {idx + 1}
                             </td>
                             <td className="py-1.5 px-4 font-medium text-slate-900 border-r border-slate-200">
                               {st.name}
                             </td>
-                            <td className="py-1.5 px-4 text-center font-semibold text-slate-800 tracking-wide">
+                            <td className="py-1.5 px-4 text-center font-bold text-slate-900 font-sans tracking-wider text-[11px]">
                               {st.studentId}
                             </td>
                           </tr>

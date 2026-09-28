@@ -348,13 +348,17 @@ export async function deleteProject(projectCodeInput: string): Promise<{ success
       return { success: false, message: `Project code "${code}" not found.` };
     }
 
+    // Delete all child records referencing this project to satisfy FK constraints
     await prisma.projectMember.deleteMany({ where: { projectCode: code } });
+    await prisma.foodToken.deleteMany({ where: { projectCode: code } });
+    await prisma.dailyFoodEligibility.deleteMany({ where: { projectCode: code } });
     await prisma.project.delete({ where: { code } });
 
-    appCache.invalidateTags(['projects', 'students', 'dashboard']);
+    appCache.invalidateTags(['projects', 'students', 'dashboard', 'food-list']);
     revalidatePath('/projects');
     revalidatePath('/students');
     revalidatePath('/dashboard');
+    revalidatePath('/daily-food-list');
 
     return { success: true, message: `Project ${project.name} (${code}) deleted successfully.` };
   } catch (error) {

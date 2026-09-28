@@ -2,7 +2,7 @@
 
 import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
-import { getMealSession, getDuplicateTokenMessage } from '@/utils/timeUtils';
+import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession } from '@/utils/timeUtils';
 import { revalidatePath } from 'next/cache';
 
 export interface IssueTokenResult {
@@ -111,23 +111,29 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
       };
     }
 
-    // 3. Check if token was already issued for this date
-    const existingToken = await prisma.foodToken.findUnique({
+    const currentSession = getMealSession();
+
+    // 3. Check if token was already issued for this date AND current session
+    const studentTokensToday = await prisma.foodToken.findMany({
       where: {
-        date_studentId: {
-          date,
-          studentId: student.id,
-        },
+        date,
+        studentId: student.id,
       },
+      orderBy: { issuedAt: 'desc' },
     });
+
+    const existingToken = (studentTokensToday || []).find(
+      (t: any) =>
+        (t.session || '').toUpperCase() === currentSession.toUpperCase() ||
+        getTokenEffectiveSession(t) === currentSession
+    );
 
     if (existingToken) {
       const timeStr = existingToken.issuedAt instanceof Date
         ? existingToken.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
         : 'Earlier';
 
-      const session = getMealSession(existingToken.issuedAt ? new Date(existingToken.issuedAt) : new Date());
-      const smartMessage = getDuplicateTokenMessage(session, timeStr, student.name);
+      const smartMessage = getDuplicateTokenMessage(currentSession, timeStr, student.name);
 
       return {
         found: true,
@@ -146,13 +152,12 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
           tokenNumber: existingToken.tokenNumber,
           time: timeStr,
           date: existingToken.date,
-          session,
+          session: currentSession,
         },
         message: smartMessage,
       };
     }
 
-    const currentSession = getMealSession();
     return {
       found: true,
       student: {
@@ -212,22 +217,28 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         };
       }
 
-      // 3. Check for Duplicate Token Today
-      const existingToken = await tx.foodToken.findUnique({
+      const session = getMealSession();
+
+      // 3. Check for Duplicate Token for current session Today
+      const studentTokensToday = await tx.foodToken.findMany({
         where: {
-          date_studentId: {
-            date: todayStr,
-            studentId: student.id,
-          },
+          date: todayStr,
+          studentId: student.id,
         },
+        orderBy: { issuedAt: 'desc' },
       });
+
+      const existingToken = (studentTokensToday || []).find(
+        (t: any) =>
+          (t.session || '').toUpperCase() === session.toUpperCase() ||
+          getTokenEffectiveSession(t) === session
+      );
 
       if (existingToken) {
         const timeStr = existingToken.issuedAt instanceof Date
           ? existingToken.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
           : 'earlier today';
 
-        const session = getMealSession(existingToken.issuedAt ? new Date(existingToken.issuedAt) : new Date());
         const smartMessage = getDuplicateTokenMessage(session, timeStr, student.name);
 
         return {
@@ -243,42 +254,52 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
       const seq = String(countToday + 1).padStart(3, '0');
       const dateTag = todayStr.replace(/-/g, '').slice(2);
       const tokenNumber = `INC-${dateTag}-${seq}`;
-      const session = getMealSession();
 
       // 5. Create Token Record
-      const token = await tx.foodToken.create({
-        data: {
-          tokenNumber,
-          date: todayStr,
-          studentId: student.id,
-          projectCode: eligibility.projectCode,
-          status: 'Generated',
-          issuedById: validStaffId,
-        },
-      });
+      try {
+        const token = await tx.foodToken.create({
+          data: {
+            tokenNumber,
+            date: todayStr,
+            studentId: student.id,
+            projectCode: eligibility.projectCode,
+            session,
+            status: 'Generated',
+            issuedById: validStaffId,
+          },
+        });
 
-      // 6. Refresh cached Dashboard and Food Token views
-      appCache.invalidateTags(['dashboard', 'foodtokens', 'foodlist']);
+        // 6. Refresh cached Dashboard and Food Token views
+        appCache.invalidateTags(['dashboard', 'foodtokens', 'foodlist']);
 
-      const timeFormatted = token.issuedAt instanceof Date
-        ? token.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-        : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const timeFormatted = token.issuedAt instanceof Date
+          ? token.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+          : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
-      return {
-        success: true,
-        message: `Token ${token.tokenNumber} generated successfully for ${student.name} (${session}).`,
-        token: {
-          id: token.id,
-          tokenNumber: token.tokenNumber,
-          studentId: student.id,
-          studentName: student.name,
-          project: eligibility.project?.name || eligibility.projectCode,
-          date: todayStr,
-          time: timeFormatted,
-          session,
-          status: token.status,
-        },
-      };
+        return {
+          success: true,
+          message: `Token ${token.tokenNumber} generated successfully for ${student.name} (${session}).`,
+          token: {
+            id: token.id,
+            tokenNumber: token.tokenNumber,
+            studentId: student.id,
+            studentName: student.name,
+            project: eligibility.project?.name || eligibility.projectCode,
+            date: todayStr,
+            time: timeFormatted,
+            session,
+            status: token.status,
+          },
+        };
+      } catch (createErr: any) {
+        if (createErr.code === 'P2002') {
+          return {
+            success: false,
+            message: `Token already generated for Yuvaraj E for today's ${session} session.`,
+          };
+        }
+        throw createErr;
+      }
     });
   } catch (error) {
     console.error('Error generating token:', error);
@@ -302,7 +323,7 @@ export async function getFoodTokens(date?: string) {
 
       return tokens.map((t: any) => {
         const issuedDate = t.issuedAt instanceof Date ? t.issuedAt : new Date();
-        const session = getMealSession(issuedDate);
+        const session = getTokenEffectiveSession(t);
         return {
           id: t.id,
           tokenNumber: t.tokenNumber,

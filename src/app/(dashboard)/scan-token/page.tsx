@@ -5,6 +5,7 @@ import TokenPrintSlip from '@/components/TokenPrintSlip';
 import { verifyStudentScan, issueFoodToken, type VerificationResult } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getMealSession } from '@/utils/timeUtils';
+import { getStudents, type StudentRecord } from '@/actions/studentActions';
 
 type ScanState =
   | 'idle'
@@ -38,10 +39,12 @@ export default function ScanToken() {
   const [generatedToken, setGeneratedToken] = useState<TokenDisplay | null>(null);
   const [todayStr] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
+  const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getDailyFoodList(todayStr).then(res => setFoodListInfo(res)).catch(() => {});
+    getStudents().then(res => setDbStudents(res)).catch(() => {});
   }, [todayStr]);
 
   // Keep input focused for physical hardware USB/Bluetooth barcode scanner guns
@@ -233,23 +236,30 @@ export default function ScanToken() {
             </button>
           </form>
 
-          {/* Sample Student Quick-Tap Buttons */}
+          {/* Registered Student Quick-Tap Buttons */}
           <div className="pt-2 border-t border-slate-800">
-            <div className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-              Quick Test ID Card Tap:
+            <div className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider flex items-center justify-between">
+              <span>Quick Test ID Card Tap (Registered Students):</span>
+              <span className="text-[10px] text-indigo-400 font-mono">{dbStudents.length} Students</span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {['23CS101', '23CS102', 'SEC24CS064', '23CS103', '23ME101'].map(sampleId => (
-                <button
-                  key={sampleId}
-                  type="button"
-                  onClick={() => handleQuickTapScan(sampleId)}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-indigo-900 border border-slate-700 text-xs font-mono font-semibold text-indigo-300 rounded-lg transition-colors cursor-pointer"
-                >
-                  Tap {sampleId}
-                </button>
-              ))}
-            </div>
+            {dbStudents.length === 0 ? (
+              <div className="text-xs text-slate-500 italic py-1">No registered students found in database</div>
+            ) : (
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+                {dbStudents.map(studentItem => (
+                  <button
+                    key={studentItem.id}
+                    type="button"
+                    onClick={() => handleQuickTapScan(studentItem.id)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-indigo-900 border border-slate-700 text-xs font-mono font-semibold text-indigo-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                    title={`${studentItem.name} (${studentItem.department})`}
+                  >
+                    <span>Tap {studentItem.id}</span>
+                    <span className="text-[10px] font-sans text-slate-400 font-normal">({studentItem.name.split(' ')[0]})</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

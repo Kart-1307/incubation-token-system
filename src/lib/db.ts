@@ -563,8 +563,13 @@ const memoryPrisma: any = {
   },
 
   foodToken: {
-    findUnique: async ({ where, include }: { where: { date_studentId?: { date: string; studentId: string }; tokenNumber?: string; id?: string }; include?: any }) => {
+    findUnique: async ({ where, include }: { where: { date_studentId_session?: { date: string; studentId: string; session: string }; date_studentId?: { date: string; studentId: string }; tokenNumber?: string; id?: string }; include?: any }) => {
       const t = store.foodTokens.find(tok => {
+        if (where.date_studentId_session) {
+          return tok.date === where.date_studentId_session.date &&
+                 tok.studentId.toUpperCase() === where.date_studentId_session.studentId.toUpperCase() &&
+                 ((tok as any).session || 'LUNCH').toUpperCase() === where.date_studentId_session.session.toUpperCase();
+        }
         if (where.date_studentId) {
           return tok.date === where.date_studentId.date && tok.studentId.toUpperCase() === where.date_studentId.studentId.toUpperCase();
         }
@@ -574,7 +579,29 @@ const memoryPrisma: any = {
         return tok.id === where.id;
       });
       if (!t) return null;
-      const res: any = { ...t };
+      const res: any = { ...t, session: (t as any).session || 'LUNCH' };
+      if (include?.student) {
+        res.student = store.students.find(s => s.id === t.studentId);
+      }
+      if (include?.project) {
+        res.project = store.projects.find(p => p.code === t.projectCode);
+      }
+      return res;
+    },
+    findFirst: async ({ where, include, orderBy }: any = {}) => {
+      let list = [...store.foodTokens];
+      if (where) {
+        if (where.date) list = list.filter(t => t.date === where.date);
+        if (where.studentId) list = list.filter(t => t.studentId.toUpperCase() === where.studentId.toUpperCase());
+        if (where.session) list = list.filter(t => ((t as any).session || 'LUNCH').toUpperCase() === where.session.toUpperCase());
+        if (where.tokenNumber) list = list.filter(t => t.tokenNumber.toUpperCase() === where.tokenNumber.toUpperCase());
+      }
+      if (orderBy?.issuedAt === 'desc') {
+        list.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
+      }
+      const t = list[0] || null;
+      if (!t) return null;
+      const res: any = { ...t, session: (t as any).session || 'LUNCH' };
       if (include?.student) {
         res.student = store.students.find(s => s.id === t.studentId);
       }
@@ -591,12 +618,16 @@ const memoryPrisma: any = {
       if (args.where?.studentId) {
         list = list.filter(t => t.studentId === args.where.studentId);
       }
+      if (args.where?.session) {
+        list = list.filter(t => ((t as any).session || 'LUNCH').toUpperCase() === args.where.session.toUpperCase());
+      }
       if (args.orderBy?.issuedAt === 'desc') {
         list.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
       }
       if (args.include?.student || args.include?.project) {
         return list.map(t => ({
           ...t,
+          session: (t as any).session || 'LUNCH',
           student: args.include?.student ? store.students.find(s => s.id === t.studentId) : undefined,
           project: args.include?.project ? store.projects.find(p => p.code === t.projectCode) : undefined,
         }));
@@ -608,6 +639,9 @@ const memoryPrisma: any = {
       if (args.where?.date) {
         list = list.filter(t => t.date === args.where.date);
       }
+      if (args.where?.session) {
+        list = list.filter(t => ((t as any).session || 'LUNCH').toUpperCase() === args.where.session.toUpperCase());
+      }
       return list.length;
     },
     create: async ({ data }: { data: any }) => {
@@ -617,6 +651,7 @@ const memoryPrisma: any = {
         date: data.date,
         studentId: data.studentId.toUpperCase(),
         projectCode: data.projectCode,
+        session: data.session || 'LUNCH',
         status: data.status || 'Generated',
         issuedAt: new Date(),
         issuedById: data.issuedById || 'staff-001',
@@ -638,8 +673,11 @@ function isConnectionError(error: any): boolean {
   return (
     code === 'P1017' ||
     code === 'P1001' ||
+    code === 'P2022' ||
+    code === 'P2021' ||
     msg.includes('closed the connection') ||
     msg.includes('ConnectionReset') ||
+    msg.includes('does not exist') ||
     msg.includes('ETIMEDOUT') ||
     msg.includes('ECONNREFUSED')
   );

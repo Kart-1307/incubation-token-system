@@ -6,6 +6,7 @@ import Badge from '@/components/Badge';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getStudents, getProjects, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { getMealSession, getTokenEffectiveSession } from '@/utils/timeUtils';
 
 export default function Dashboard() {
   const todayStr = new Date().toISOString().split('T')[0];
@@ -38,21 +39,41 @@ export default function Dashboard() {
     loadData();
   }, [todayStr]);
 
+  const currentSession = getMealSession();
   const eligibleCount = todayList?.entries.length ?? 0;
   const tokensGeneratedCount = tokensList.length;
+
+  // Meal Session Breakdown Counts
+  const mealSessionCounts = useMemo(() => {
+    const breakfast = tokensList.filter(t => getTokenEffectiveSession(t) === 'BREAKFAST');
+    const lunch = tokensList.filter(t => getTokenEffectiveSession(t) === 'LUNCH');
+    const dinner = tokensList.filter(t => getTokenEffectiveSession(t) === 'DINNER');
+
+    return {
+      BREAKFAST: breakfast.length,
+      LUNCH: lunch.length,
+      DINNER: dinner.length,
+    };
+  }, [tokensList]);
+
+  // Active Session Stats
+  const activeSessionTokensCount = mealSessionCounts[currentSession] || 0;
+  const activeSessionTurnout = eligibleCount > 0 ? Math.min(100, Math.round((activeSessionTokensCount / eligibleCount) * 100)) : 0;
 
   // Project distribution
   const projectStats = useMemo(() => {
     return projectRegistry.map(proj => {
       const eligibleInProj = (todayList?.entries ?? []).filter(e => e.projectCode === proj.code || e.projectName === proj.name).length;
       const tokensInProj = tokensList.filter(t => t.project === proj.name || t.project === proj.code);
+      const activeSessionTokensInProj = tokensInProj.filter(t => getTokenEffectiveSession(t) === currentSession).length;
       return {
         project: proj,
         eligible: eligibleInProj,
-        tokensIssued: tokensInProj.length,
+        activeSessionTokens: activeSessionTokensInProj,
+        totalTokensIssued: tokensInProj.length,
       };
     });
-  }, [todayList, tokensList, projectRegistry]);
+  }, [todayList, tokensList, projectRegistry, currentSession]);
 
   // Filtered token feed
   const filteredTokens = useMemo(() => {
@@ -68,8 +89,6 @@ export default function Dashboard() {
       return matchesSearch;
     });
   }, [tokensList, searchTerm, studentRegistry]);
-
-  const issuanceRate = eligibleCount > 0 ? Math.round((tokensGeneratedCount / eligibleCount) * 100) : 0;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -108,12 +127,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 2. Primary KPI Metric Cards in Structured Grid */}
+      {/* 1. Primary KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Metric 1: Eligible Students */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-indigo-200 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Eligible Today</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Approved List Today</span>
             <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm">
               ✓
             </span>
@@ -128,54 +147,178 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Metric 2: Tokens Issued */}
+        {/* Metric 2: Active Session Turnout (Replaces misleading 167%) */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-indigo-200 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tokens Generated</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Active Session ({currentSession})</span>
             <span className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
               🎫
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-indigo-700">{tokensGeneratedCount}</span>
-            <span className="text-xs font-medium text-emerald-600">{issuanceRate}% of eligible</span>
+            <span className="text-3xl font-bold text-indigo-700">{activeSessionTokensCount} <span className="text-base text-slate-400 font-normal">/ {eligibleCount}</span></span>
+            <span className="text-xs font-semibold text-emerald-600">{activeSessionTurnout}% turnout</span>
           </div>
           <div className="mt-3">
             <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
               <div
                 className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${issuanceRate}%` }}
+                style={{ width: `${activeSessionTurnout}%` }}
               ></div>
             </div>
             <div className="mt-1 flex justify-between text-[11px] text-slate-400">
-              <span>{tokensGeneratedCount} generated</span>
-              <span>{Math.max(0, eligibleCount - tokensGeneratedCount)} remaining</span>
+              <span>{activeSessionTokensCount} served for {currentSession}</span>
+              <span>{Math.max(0, eligibleCount - activeSessionTokensCount)} pending</span>
             </div>
           </div>
         </div>
 
-        {/* Metric 3: Active Incubation Registry */}
+        {/* Metric 3: Total Meal Servings Today */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-indigo-200 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Students Registry</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Servings Today</span>
             <span className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center font-bold text-sm">
-              👥
+              🍱
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-slate-900">{studentRegistry.length}</span>
-            <span className="text-xs text-slate-500">{studentRegistry.filter(s => s.status === 'Active').length} active</span>
+            <span className="text-3xl font-bold text-slate-900">{tokensGeneratedCount}</span>
+            <span className="text-xs text-slate-500">total tokens issued</span>
           </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>Active Projects:</span>
-            <span className="font-semibold text-slate-700">{projectRegistry.filter(p => p.status === 'Active').length} teams</span>
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+            <span>🌅 {mealSessionCounts.BREAKFAST} B</span>
+            <span>☀️ {mealSessionCounts.LUNCH} L</span>
+            <span>🌙 {mealSessionCounts.DINNER} D</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. DEDICATED MEAL-WISE TOKEN BREAKDOWN PANEL */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+              Meal-Wise Token Breakdown
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">Live turnout statistics across Breakfast, Lunch & Dinner sessions</p>
+          </div>
+          <span className="px-3 py-1 bg-indigo-50 border border-indigo-100 text-indigo-800 text-xs font-bold rounded-full uppercase">
+            Active Session: {currentSession}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+          {/* Breakfast Session Card */}
+          <div className={`p-4 rounded-xl border transition-all ${
+            currentSession === 'BREAKFAST'
+              ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400/20'
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🌅</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Breakfast</span>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                currentSession === 'BREAKFAST' ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {currentSession === 'BREAKFAST' ? 'Active' : 'Morning'}
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-2xl font-black text-slate-900">{mealSessionCounts.BREAKFAST} <span className="text-xs font-normal text-slate-500">/ {eligibleCount}</span></span>
+              <span className="text-xs font-bold text-slate-700">
+                {eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.BREAKFAST / eligibleCount) * 100)) : 0}% Turnout
+              </span>
+            </div>
+            <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
+              <div
+                className="bg-amber-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.BREAKFAST / eligibleCount) * 100)) : 0}%` }}
+              />
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
+              <span>{mealSessionCounts.BREAKFAST} tokens issued</span>
+              <span>{Math.max(0, eligibleCount - mealSessionCounts.BREAKFAST)} pending</span>
+            </div>
+          </div>
+
+          {/* Lunch Session Card */}
+          <div className={`p-4 rounded-xl border transition-all ${
+            currentSession === 'LUNCH'
+              ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400/20'
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">☀️</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Lunch</span>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                currentSession === 'LUNCH' ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {currentSession === 'LUNCH' ? 'Active' : 'Afternoon'}
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-2xl font-black text-slate-900">{mealSessionCounts.LUNCH} <span className="text-xs font-normal text-slate-500">/ {eligibleCount}</span></span>
+              <span className="text-xs font-bold text-emerald-700">
+                {eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.LUNCH / eligibleCount) * 100)) : 0}% Turnout
+              </span>
+            </div>
+            <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
+              <div
+                className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.LUNCH / eligibleCount) * 100)) : 0}%` }}
+              />
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
+              <span>{mealSessionCounts.LUNCH} tokens issued</span>
+              <span>{Math.max(0, eligibleCount - mealSessionCounts.LUNCH)} pending</span>
+            </div>
+          </div>
+
+          {/* Dinner Session Card */}
+          <div className={`p-4 rounded-xl border transition-all ${
+            currentSession === 'DINNER'
+              ? 'bg-indigo-50/80 border-indigo-300 ring-2 ring-indigo-400/20'
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🌙</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Dinner</span>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                currentSession === 'DINNER' ? 'bg-indigo-200 text-indigo-900' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {currentSession === 'DINNER' ? 'Active' : 'Evening'}
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-2xl font-black text-slate-900">{mealSessionCounts.DINNER} <span className="text-xs font-normal text-slate-500">/ {eligibleCount}</span></span>
+              <span className="text-xs font-bold text-indigo-700">
+                {eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.DINNER / eligibleCount) * 100)) : 0}% Turnout
+              </span>
+            </div>
+            <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
+              <div
+                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.DINNER / eligibleCount) * 100)) : 0}%` }}
+              />
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
+              <span>{mealSessionCounts.DINNER} tokens issued</span>
+              <span>{Math.max(0, eligibleCount - mealSessionCounts.DINNER)} pending</span>
+            </div>
           </div>
         </div>
       </div>
 
       {/* 3. Operational Overview & Pipeline */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Food Service Pipeline & Pending Alerts */}
+        {/* Left Column: Food Service Pipeline & Project Breakdown */}
         <div className="space-y-6">
           {/* Service Flow Pipeline */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
@@ -205,8 +348,8 @@ export default function Dashboard() {
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">2</div>
                   <div>
-                    <div className="text-xs font-semibold text-emerald-900">Tokens Generated</div>
-                    <div className="text-[11px] text-emerald-700">Tokens ready for eligible students</div>
+                    <div className="text-xs font-semibold text-emerald-900">Total Servings Issued</div>
+                    <div className="text-[11px] text-emerald-700">Tokens generated across all sessions</div>
                   </div>
                 </div>
                 <span className="text-sm font-bold text-emerald-700">{tokensGeneratedCount}</span>
@@ -214,7 +357,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Incubation Projects Quota & Status */}
+          {/* Incubation Projects Breakdown */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-slate-800 text-sm">Project Breakdown</h3>
@@ -222,20 +365,29 @@ export default function Dashboard() {
             </div>
 
             <div className="space-y-3">
-              {projectStats.map(({ project, eligible, tokensIssued }) => (
-                <div key={project.code} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-slate-700">{project.name}</span>
-                    <span className="text-slate-500 text-[11px]">{tokensIssued} / {eligible} tokens generated</span>
+              {projectStats.map(({ project, eligible, activeSessionTokens, totalTokensIssued }) => {
+                const projectTurnout = eligible > 0 ? Math.min(100, Math.round((activeSessionTokens / eligible) * 100)) : 0;
+                return (
+                  <div key={project.code} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-800">{project.name}</span>
+                      <span className="text-slate-500 text-[11px]">
+                        {activeSessionTokens} / {eligible} served for {currentSession}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${projectTurnout}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-400 pt-0.5">
+                      <span>{eligible} approved students</span>
+                      <span>{totalTokensIssued} total meal tokens</span>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className="bg-indigo-600 h-1.5 rounded-full"
-                      style={{ width: `${eligible > 0 ? (tokensIssued / eligible) * 100 : 0}%` }}
-                    ></div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -289,7 +441,7 @@ export default function Dashboard() {
                     <th className="text-left py-2.5 pr-3 font-semibold">Token No</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Student</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Project</th>
-                    <th className="text-left py-2.5 pr-3 font-semibold">Time</th>
+                    <th className="text-left py-2.5 pr-3 font-semibold">Session & Time</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Status</th>
                     <th className="text-right py-2.5 pl-3 font-semibold">Details</th>
                   </tr>
@@ -304,6 +456,7 @@ export default function Dashboard() {
                   ) : filteredTokens.length > 0 ? (
                     filteredTokens.map(token => {
                       const student = studentRegistry.find(s => s.id === token.studentId);
+                      const sessionLabel = getTokenEffectiveSession(token);
                       return (
                         <tr key={token.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="py-3 pr-3 font-semibold text-indigo-700 tracking-wide font-mono tabular-nums">
@@ -318,8 +471,9 @@ export default function Dashboard() {
                               {token.project}
                             </span>
                           </td>
-                          <td className="py-3 pr-3 text-slate-500">
-                            <div>{token.time}</div>
+                          <td className="py-3 pr-3 text-slate-600">
+                            <div className="font-semibold text-[11px] text-indigo-900">{sessionLabel}</div>
+                            <div className="text-slate-400 text-[10px]">{token.time}</div>
                           </td>
                           <td className="py-3 pr-3">
                             <Badge status={token.status} />
