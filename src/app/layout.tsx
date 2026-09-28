@@ -20,7 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans antialiased bg-slate-100 text-slate-900">
+      <body className={`${inter.className} font-sans antialiased bg-slate-100 text-slate-900`}>
         {children}
       </body>
     </html>
