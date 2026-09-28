@@ -3,18 +3,15 @@
 export default function OfficialSairamLogo({ className = '' }: { className?: string }) {
   return (
     <div className={`flex flex-col items-center justify-center text-center select-none ${className}`}>
-      <div className="flex items-center gap-1.5 mb-0.5">
-        <span className="font-serif italic text-sm font-bold text-sky-600">Sri</span>
-        <span className="font-black text-2xl tracking-tight text-[#003366] uppercase">
-          SAIRAM
-        </span>
-      </div>
-      <div className="font-bold text-xs tracking-widest text-[#003366] uppercase">
-        ENGINEERING COLLEGE
-      </div>
-      <div className="text-[11px] font-semibold text-slate-500 tracking-wide mt-0.5">
-        Incubation Centre · Food Token System
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-center max-w-[280px]">
+        {/* Official Sairam Institutions Logo (Sai Baba Portrait + Sairam + INSTITUTIONS Banner) */}
+        <img
+          src="/sairam-engineering-college-logo.png"
+          alt="Sairam Institutions Logo"
+          className="w-full h-auto max-h-44 object-contain rounded-xl"
+        />
       </div>
     </div>
   );
 }
+

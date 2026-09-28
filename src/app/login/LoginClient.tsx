@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { loginStaff, registerStaff } from '@/actions/authActions';
+import OfficialSairamLogo from '@/components/OfficialSairamLogo';
 
 export default function LoginClient() {
   const router = useRouter();
@@ -82,18 +83,13 @@ export default function LoginClient() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Clean Institutional Header */}
-        <div className="text-center mb-6">
-          <div className="text-sm font-black tracking-widest text-[#003366] uppercase mb-1">
-            SRI SAIRAM ENGINEERING COLLEGE
+      <div className="w-full max-w-md space-y-4">
+        {/* Official College Logo & Subtitle */}
+        <div className="flex flex-col items-center justify-center text-center">
+          <OfficialSairamLogo className="mb-3" />
+          <div className="bg-indigo-900 text-white text-[11px] font-bold uppercase tracking-widest px-3 py-1 rounded-full shadow-xs">
+            Incubation Centre · Food Management System
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            Incubation Centre
-          </h1>
-          <p className="text-xs text-slate-500 font-medium mt-1">
-            Food Token Management System · Staff Portal
-          </p>
         </div>
 
         {/* Tab Toggle: Sign In / Sign Up */}
