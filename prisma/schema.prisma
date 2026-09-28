@@ -1,0 +1,141 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------------------------------------------------------------------------
+// 1. Staff Authentication (Single Staff Login Only)
+// ---------------------------------------------------------------------------
+model StaffUser {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  email        String    @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  createdFoodLists DailyFoodList[] @relation("CreatedFoodLists")
+  issuedTokens     FoodToken[]     @relation("IssuedTokens")
+
+  @@map("staff_users")
+}
+
+// ---------------------------------------------------------------------------
+// 2. Student Registry
+// ---------------------------------------------------------------------------
+model Student {
+  id          String   @id // College Roll/Registration ID, e.g., "23CS101"
+  name        String
+  department  String   // "CSE", "ECE", "ME", etc.
+  year        Int      // 1, 2, 3, 4
+  email       String   @unique
+  phone       String?
+  status      String   @default("Active") // "Active" | "Inactive"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  projectMemberships ProjectMember[]
+  foodEligibilities  DailyFoodEligibility[]
+  foodTokens         FoodToken[]
+
+  @@index([department])
+  @@index([status])
+  @@map("students")
+}
+
+// ---------------------------------------------------------------------------
+// 3. Incubation Projects
+// ---------------------------------------------------------------------------
+model Project {
+  code        String   @id // Short identifier, e.g., "AGRI-01"
+  name        String   // Project Name, e.g., "AgriCheck"
+  description String?
+  status      String   @default("Active") // "Active" | "Completed"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members           ProjectMember[]
+  foodEligibilities DailyFoodEligibility[]
+  foodTokens        FoodToken[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id          String   @id @default(uuid())
+  studentId   String
+  projectCode String
+  role        String   @default("Member") // "Lead Developer", "Developer", "Member"
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectCode], references: [code], onDelete: Cascade)
+
+  @@unique([studentId, projectCode])
+  @@map("project_members")
+}
+
+// ---------------------------------------------------------------------------
+// 4. Daily Food List & Eligibility Management
+// ---------------------------------------------------------------------------
+model DailyFoodList {
+  date        String    @id // Format "YYYY-MM-DD" e.g., "2026-09-25"
+  status      String    @default("Draft") // "Draft" | "Finalized"
+  finalizedBy String?
+  finalizedAt DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  creator     StaffUser              @relation("CreatedFoodLists", fields: [createdById], references: [id])
+  entries     DailyFoodEligibility[]
+
+  @@map("daily_food_lists")
+}
+
+model DailyFoodEligibility {
+  id          String   @id @default(uuid())
+  date        String
+  studentId   String
+  projectCode String
+  addedBy     String   @default("Staff")
+  status      String   @default("Eligible")
+  createdAt   DateTime @default(now())
+
+  foodList DailyFoodList @relation(fields: [date], references: [date], onDelete: Cascade)
+  student  Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  project  Project       @relation(fields: [projectCode], references: [code])
+
+  // Critical rule: A student can only be listed once for a specific date
+  @@unique([date, studentId])
+  @@index([date])
+  @@map("daily_food_eligibilities")
+}
+
+// ---------------------------------------------------------------------------
+// 5. Food Tokens (Generated at Mess Terminal)
+// ---------------------------------------------------------------------------
+model FoodToken {
+  id          String   @id @default(uuid())
+  tokenNumber String   @unique // e.g., "INC-260925-001"
+  date        String   // "YYYY-MM-DD"
+  studentId   String
+  projectCode String
+  status      String   @default("Generated") // Simple status
+  issuedAt    DateTime @default(now())
+  issuedById  String
+
+  student  Student   @relation(fields: [studentId], references: [id])
+  project  Project   @relation(fields: [projectCode], references: [code])
+  issuedBy StaffUser @relation("IssuedTokens", fields: [issuedById], references: [id])
+
+  // Strict constraint: Only 1 token per student per day
+  @@unique([date, studentId])
+  @@index([date])
+  @@map("food_tokens")
+}
