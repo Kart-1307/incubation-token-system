@@ -247,13 +247,21 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         };
       }
 
-      // 4. Generate Consecutive Daily Token Sequence
-      const countToday = await tx.foodToken.count({
+      // 4. Generate Consecutive Daily Token Sequence (Collision-free)
+      const existingTokensToday = await tx.foodToken.findMany({
         where: { date: todayStr },
+        select: { tokenNumber: true },
       });
-      const seq = String(countToday + 1).padStart(3, '0');
       const dateTag = todayStr.replace(/-/g, '').slice(2);
-      const tokenNumber = `INC-${dateTag}-${seq}`;
+
+      const usedNumbers = new Set((existingTokensToday || []).map((t: any) => t.tokenNumber));
+      let nextSeqNum = (existingTokensToday || []).length + 1;
+      let tokenNumber = `INC-${dateTag}-${String(nextSeqNum).padStart(3, '0')}`;
+
+      while (usedNumbers.has(tokenNumber)) {
+        nextSeqNum++;
+        tokenNumber = `INC-${dateTag}-${String(nextSeqNum).padStart(3, '0')}`;
+      }
 
       // 5. Create Token Record
       try {
@@ -295,7 +303,7 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         if (createErr.code === 'P2002') {
           return {
             success: false,
-            message: `Token already generated for Yuvaraj E for today's ${session} session.`,
+            message: `Token already generated for ${student.name} for today's ${session} session.`,
           };
         }
         throw createErr;

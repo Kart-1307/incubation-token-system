@@ -670,16 +670,23 @@ function isConnectionError(error: any): boolean {
   if (!error) return false;
   const msg = String(error.message || error);
   const code = error.code;
+  const name = error.name;
   return (
+    name === 'PrismaClientInitializationError' ||
     code === 'P1017' ||
     code === 'P1001' ||
+    code === 'P1000' ||
+    code === 'P1002' ||
+    code === 'P1003' ||
     code === 'P2022' ||
     code === 'P2021' ||
+    msg.includes("Can't reach database") ||
     msg.includes('closed the connection') ||
     msg.includes('ConnectionReset') ||
     msg.includes('does not exist') ||
     msg.includes('ETIMEDOUT') ||
-    msg.includes('ECONNREFUSED')
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ENOTFOUND')
   );
 }
 
