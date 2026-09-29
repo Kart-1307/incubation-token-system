@@ -3,9 +3,30 @@
 import { useState, useEffect, useCallback } from 'react';
 import Badge from '@/components/Badge';
 import { getStudents, createStudent, getProjects, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
-import { generateStudentIdBadgesPdf } from '@/utils/generateStudentIdPdf';
 
-const depts = ['All', 'CSE', 'ME', 'ECE', 'EEE', 'Civil'];
+const UNDERGRAD_DEPARTMENTS = [
+  'Civil Engineering',
+  'Computer Science and Engineering',
+  'Electrical and Electronics Engineering',
+  'Electronics and Communication Engineering',
+  'Electronics and Instrumentation Engineering',
+  'Mechanical Engineering',
+  'Mechatronics Engineering',
+  'Computer and Communication Engineering',
+  'Computer Science and Engineering (Artificial Intelligence and Machine Learning)',
+  'Computer Science and Engineering (Cyber Security)',
+  'Computer Science and Engineering (Internet of Things)',
+  'Information Technology (B.Tech)',
+  'Artificial Intelligence and Data Science (B.Tech)',
+  'Computer Science and Business Systems (B.Tech)',
+];
+
+const POSTGRAD_DEPARTMENTS = [
+  'Integrated & Postgraduate Programs (M.E. / M.Tech)',
+];
+
+const ALL_DEPARTMENTS = [...UNDERGRAD_DEPARTMENTS, ...POSTGRAD_DEPARTMENTS];
+
 const years = ['All', '1', '2', '3', '4'];
 
 type View = 'list' | 'detail';
@@ -22,42 +43,17 @@ export default function Students() {
   const [showAdd, setShowAdd] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
   const [toast, setToast] = useState('');
-  const [exportingPdf, setExportingPdf] = useState(false);
 
-  const [form, setForm] = useState({ id: '', name: '', department: 'CSE', year: '3', email: '', phone: '', status: 'Active' });
+  const [form, setForm] = useState({
+    id: '',
+    name: '',
+    department: 'Computer Science and Engineering',
+    year: '3',
+    email: '',
+    phone: '',
+    status: 'Active',
+  });
   const [formError, setFormError] = useState('');
-
-  const handleExportIdBadges = async () => {
-    const listToExport = filtered.length > 0 ? filtered : studentList;
-    if (listToExport.length === 0) {
-      showToast('No students available in database to export.');
-      return;
-    }
-    setExportingPdf(true);
-    try {
-      const badgesData = listToExport.map(s => {
-        const matchingProject = projectList.find(p => (s.projects || []).includes(p.code));
-        return {
-          id: s.id,
-          name: s.name,
-          department: s.department,
-          year: s.year,
-          status: s.status,
-          projects: s.projects,
-          projectName: matchingProject ? `${matchingProject.code} · ${matchingProject.name}` : undefined,
-        };
-      });
-
-      const doc = await generateStudentIdBadgesPdf(badgesData);
-      doc.save(`Sairam_Student_ID_Cards_${new Date().toISOString().split('T')[0]}.pdf`);
-      showToast(`Exported ${badgesData.length} Student ID Badges to PDF!`);
-    } catch (err) {
-      console.error(err);
-      showToast('Failed to generate Student ID Badges PDF.');
-    } finally {
-      setExportingPdf(false);
-    }
-  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -88,10 +84,28 @@ export default function Students() {
   const filtered = studentList.filter(s => {
     const q = search.toLowerCase();
     const matchQ = !q || s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
-    const matchDept = deptFilter === 'All' || s.department === deptFilter;
+    const matchDept =
+      deptFilter === 'All' ||
+      s.department === deptFilter ||
+      (deptFilter === 'Computer Science and Engineering' && s.department === 'CSE') ||
+      (deptFilter === 'Mechanical Engineering' && s.department === 'ME') ||
+      (deptFilter === 'Electronics and Communication Engineering' && s.department === 'ECE') ||
+      (deptFilter === 'Electrical and Electronics Engineering' && s.department === 'EEE') ||
+      (deptFilter === 'Civil Engineering' && s.department === 'Civil');
     const matchYear = yearFilter === 'All' || String(s.year) === yearFilter;
     return matchQ && matchDept && matchYear;
   });
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, deptFilter, yearFilter]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const paginatedStudents = filtered.slice(startIndex, startIndex + PAGE_SIZE);
 
   const saveStudent = async () => {
     if (!form.id || !form.name || !form.email) {
@@ -111,7 +125,7 @@ export default function Students() {
 
     if (res.success) {
       showToast(res.message);
-      setForm({ id: '', name: '', department: 'CSE', year: '3', email: '', phone: '', status: 'Active' });
+      setForm({ id: '', name: '', department: 'Computer Science and Engineering', year: '3', email: '', phone: '', status: 'Active' });
       setFormError('');
       setShowAdd(false);
       await loadData();
@@ -227,28 +241,6 @@ export default function Students() {
         </div>
         <div className="flex items-center gap-2.5">
           <button
-            onClick={handleExportIdBadges}
-            disabled={exportingPdf || studentList.length === 0}
-            className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
-            title="Export scannable ID cards PDF for all registered students"
-          >
-            {exportingPdf ? (
-              <>
-                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Generating Badges...</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                <span>Export ID Badges (PDF)</span>
-              </>
-            )}
-          </button>
-          <button
             onClick={() => setShowAdd(true)}
             className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
           >
@@ -268,9 +260,19 @@ export default function Students() {
         <select
           value={deptFilter}
           onChange={e => setDeptFilter(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white max-w-xs"
         >
-          {depts.map(d => <option key={d}>{d}</option>)}
+          <option value="All">All Departments</option>
+          <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+            {UNDERGRAD_DEPARTMENTS.map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Integrated & Postgraduate Programs (M.E. / M.Tech)">
+            {POSTGRAD_DEPARTMENTS.map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </optgroup>
         </select>
         <select
           value={yearFilter}
@@ -301,48 +303,94 @@ export default function Students() {
             </button>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                {['Roll No / ID', 'Name', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
-                  <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(s => (
-                <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                  <td className="py-3 px-4 text-xs text-indigo-700 font-semibold tracking-wide font-mono">{s.id}</td>
-                  <td className="py-3 px-4 font-medium text-slate-800">{s.name}</td>
-                  <td className="py-3 px-4 text-slate-600 text-xs">{s.department}</td>
-                  <td className="py-3 px-4 text-slate-600 text-xs">Year {s.year}</td>
-                  <td className="py-3 px-4 text-slate-500 text-xs font-mono">{s.email}</td>
-                  <td className="py-3 px-4 text-slate-500 text-xs">
-                    {s.projects.length > 0 ? (
-                      <span className="font-semibold text-slate-700">{s.projects.join(', ')}</span>
-                    ) : (
-                      <span className="text-slate-400">None</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4"><Badge status={s.status} /></td>
-                  <td className="py-3 px-4">
-                    <button
-                      onClick={() => { setSelected(s); setView('detail'); }}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline mr-3 cursor-pointer"
-                    >
-                      View Profile
-                    </button>
-                    <button
-                      onClick={() => setStudentToDelete(s)}
-                      className="text-xs text-rose-600 hover:text-rose-800 font-medium hover:underline cursor-pointer"
-                    >
-                      Delete
-                    </button>
-                  </td>
+          <div>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-center py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-14">S.No</th>
+                  {['Roll No / ID', 'Name', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
+                    <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {paginatedStudents.map((s, idx) => (
+                  <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td className="py-3 px-3 text-xs text-slate-500 font-medium text-center">{startIndex + idx + 1}</td>
+                    <td className="py-3 px-4 text-xs text-indigo-700 font-semibold tracking-wide font-mono">{s.id}</td>
+                    <td className="py-3 px-4 font-medium text-slate-800">{s.name}</td>
+                    <td className="py-3 px-4 text-slate-600 text-xs">{s.department}</td>
+                    <td className="py-3 px-4 text-slate-600 text-xs">Year {s.year}</td>
+                    <td className="py-3 px-4 text-slate-500 text-xs font-mono">{s.email}</td>
+                    <td className="py-3 px-4 text-slate-500 text-xs">
+                      {s.projects.length > 0 ? (
+                        <span className="font-semibold text-slate-700">{s.projects.join(', ')}</span>
+                      ) : (
+                        <span className="text-slate-400">None</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4"><Badge status={s.status} /></td>
+                    <td className="py-3 px-4">
+                      <button
+                        onClick={() => { setSelected(s); setView('detail'); }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline mr-3 cursor-pointer"
+                      >
+                        View Profile
+                      </button>
+                      <button
+                        onClick={() => setStudentToDelete(s)}
+                        className="text-xs text-rose-600 hover:text-rose-800 font-medium hover:underline cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Pagination Controls */}
+            {filtered.length > 0 && (
+              <div className="px-5 py-3.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50/50">
+                <div>
+                  Showing <span className="font-semibold text-slate-800">{filtered.length > 0 ? startIndex + 1 : 0}</span> to{' '}
+                  <span className="font-semibold text-slate-800">{Math.min(startIndex + PAGE_SIZE, filtered.length)}</span> of{' '}
+                  <span className="font-semibold text-slate-800">{filtered.length}</span> students
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
+                  >
+                    ← Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        className={`w-7 h-7 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          currentPage === p
+                            ? 'bg-indigo-700 text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-200/70'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -400,10 +448,23 @@ export default function Students() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className="col-span-2 sm:col-span-1">
                   <label className="block text-sm font-medium text-slate-700 mb-1">Department *</label>
-                  <select value={form.department} onChange={e => setForm(p => ({ ...p, department: e.target.value }))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    {['CSE', 'ME', 'ECE', 'EEE', 'Civil'].map(d => <option key={d}>{d}</option>)}
+                  <select
+                    value={form.department}
+                    onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+                      {UNDERGRAD_DEPARTMENTS.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Integrated & Postgraduate Programs (M.E. / M.Tech)">
+                      {POSTGRAD_DEPARTMENTS.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
                 <div>

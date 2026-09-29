@@ -42,12 +42,10 @@ export default function ScanToken() {
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
   const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
   const [liveSyncConnected, setLiveSyncConnected] = useState<boolean>(false);
-  const [showWebcamModal, setShowWebcamModal] = useState<boolean>(false);
   const [showPhoneQrModal, setShowPhoneQrModal] = useState<boolean>(false);
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string>('');
   const [tunnelUrlInput, setTunnelUrlInput] = useState<string>('https://sairam-incubation.loca.lt');
   const [copiedAlert, setCopiedAlert] = useState<string>('');
-  const webcamScannerRef = useRef<any>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const stateRef = useRef<ScanState>(state);
@@ -60,15 +58,23 @@ export default function ScanToken() {
 
   // Initialize and persist mobile scanner URL
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('last_mobile_scanner_url');
-      if (saved) {
-        setTunnelUrlInput(saved);
-      } else if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        setTunnelUrlInput(window.location.origin);
-      }
-    }
-  }, []);
+    fetch('/api/tunnel-status')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.url) {
+          setTunnelUrlInput(data.url);
+        } else if (typeof window !== 'undefined') {
+          const saved = localStorage.getItem('last_mobile_scanner_url');
+          if (saved) setTunnelUrlInput(saved);
+        }
+      })
+      .catch(() => {
+        if (typeof window !== 'undefined') {
+          const saved = localStorage.getItem('last_mobile_scanner_url');
+          if (saved) setTunnelUrlInput(saved);
+        }
+      });
+  }, [showPhoneQrModal]);
 
   // Generate dynamic QR code whenever tunnel/host URL changes
   useEffect(() => {
@@ -274,82 +280,7 @@ export default function ScanToken() {
     }
   }, [state]);
 
-  // Webcam Scanner lifecycle effect
-  useEffect(() => {
-    let mounted = true;
 
-    if (!showWebcamModal) {
-      if (webcamScannerRef.current) {
-        webcamScannerRef.current.stop().catch(() => {}).then(() => {
-          webcamScannerRef.current?.clear();
-          webcamScannerRef.current = null;
-        });
-      }
-      return;
-    }
-
-    async function startWebcamScanner() {
-      try {
-        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
-        if (!mounted) return;
-
-        const scannerId = 'laptop-webcam-reader';
-        const scanner = new Html5Qrcode(scannerId, {
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.CODE_93,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.QR_CODE,
-          ],
-          verbose: false,
-        });
-        webcamScannerRef.current = scanner;
-
-        await scanner.start(
-          { facingMode: 'user' },
-          {
-            fps: 25,
-            qrbox: (w: number, h: number) => {
-              const width = Math.min(Math.floor(w * 0.85), 320);
-              const height = Math.min(Math.floor(width * 0.45), 150);
-              return { width, height };
-            },
-          },
-          (decodedText: string) => {
-            const clean = decodedText.trim().toUpperCase();
-            if (clean) {
-              scanner.stop().catch(() => {}).then(() => {
-                scanner.clear();
-                webcamScannerRef.current = null;
-                setShowWebcamModal(false);
-                setScannedId(clean);
-                processIdVerification(clean);
-              });
-            }
-          },
-          () => {}
-        );
-      } catch (err) {
-        console.error('Laptop webcam start error:', err);
-      }
-    }
-
-    const timer = setTimeout(() => {
-      startWebcamScanner();
-    }, 150);
-
-    return () => {
-      mounted = false;
-      clearTimeout(timer);
-      if (webcamScannerRef.current) {
-        webcamScannerRef.current.stop().catch(() => {}).then(() => {
-          webcamScannerRef.current?.clear();
-          webcamScannerRef.current = null;
-        });
-      }
-    };
-  }, [showWebcamModal]);
 
   const processIdVerification = async (targetId: string) => {
     const cleanId = targetId.trim().toUpperCase();
@@ -476,20 +407,6 @@ export default function ScanToken() {
             <span>{liveSyncConnected ? 'Phone Sync: Live' : 'Phone Sync: Ready'}</span>
           </span>
 
-          {/* Laptop Webcam Scanner Button */}
-          <button
-            onClick={() => setShowWebcamModal(true)}
-            type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-            title="Scan student ID barcode using this laptop's webcam"
-          >
-            <svg className="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-              <circle cx="12" cy="13" r="4" />
-            </svg>
-            <span>Laptop Camera</span>
-          </button>
-
           {/* Connect Phone Scanner Button (Opens On-Screen QR Code Modal) */}
           <button
             onClick={() => setShowPhoneQrModal(true)}
@@ -508,16 +425,12 @@ export default function ScanToken() {
 
       {/* Food List Status Banner */}
       {foodListInfo && (
-        <div className={`p-3.5 rounded-xl border text-xs flex items-center justify-between font-medium ${
-          foodListInfo.status === 'Finalized'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-amber-50 border-amber-200 text-amber-800'
-        }`}>
+        <div className="p-3.5 rounded-xl border text-xs flex items-center justify-between font-medium bg-emerald-50 border-emerald-200 text-emerald-800 shadow-2xs">
           <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${foodListInfo.status === 'Finalized' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-            <span>Daily Food Eligibility List ({todayStr}): <strong>{foodListInfo.status}</strong> ({foodListInfo.entries.length} students)</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>Daily Food Eligibility List ({todayStr}): <strong className="text-emerald-950 font-bold">{foodListInfo.entries.length} students approved</strong></span>
           </div>
-          <div className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold text-[11px] uppercase">
+          <div className="px-2.5 py-1 rounded bg-indigo-100 text-indigo-800 font-bold text-[11px] uppercase tracking-wide">
             Active Session: {currentMealSession}
           </div>
         </div>
@@ -852,49 +765,7 @@ export default function ScanToken() {
         </div>
       )}
 
-      {/* Laptop Webcam Scanner Modal */}
-      {showWebcamModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-950 border border-slate-800 text-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-white">Laptop Webcam Barcode Scanner</h3>
-                <p className="text-xs text-slate-400">Hold student ID card up to the camera</p>
-              </div>
-              <button
-                onClick={() => setShowWebcamModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs cursor-pointer"
-              >
-                ✕ Close
-              </button>
-            </div>
 
-            <div className="p-4 flex flex-col items-center justify-center">
-              <div className="relative w-full aspect-4/3 bg-black rounded-xl overflow-hidden border border-slate-800 shadow-inner">
-                <div id="laptop-webcam-reader" className="w-full h-full object-cover" />
-
-                {/* Wide Reticle Overlay */}
-                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-4">
-                  <div className="relative w-64 h-32 border border-emerald-400/30 rounded-xl">
-                    <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg" />
-                    <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg" />
-                    <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg" />
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-lg" />
-                    <div className="absolute left-1 right-1 h-0.5 bg-rose-500 shadow-[0_0_12px_#f43f5e] animate-laser" />
-                  </div>
-                  <span className="mt-2 text-[10px] text-emerald-400 bg-slate-900/90 px-2 py-0.5 rounded-full border border-emerald-500/30 font-semibold">
-                    Align 1D Barcode (Code 128 / Code 39)
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-xs text-slate-400 text-center mt-3">
-                Point the barcode strip on the ID card directly into the frame. Instant verification will trigger upon detection.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Phone Scanner Connect QR Modal */}
       {showPhoneQrModal && (

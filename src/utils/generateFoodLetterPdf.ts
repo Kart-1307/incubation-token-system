@@ -7,15 +7,17 @@ interface StudentInfo {
 }
 
 export function generateFoodRequestLetterPdf(
-  fromName: string,
+  representativeName: string,
+  representativeRollNo: string,
+  projectsText: string,
   foodDate: string,
   studentsList: StudentInfo[]
 ) {
-  // Format date as DD-MM-YYYY if YYYY-MM-DD
+  // Format date as DD/MM/YY if YYYY-MM-DD
   let formattedDate = foodDate;
   if (/^\d{4}-\d{2}-\d{2}$/.test(foodDate)) {
     const [y, m, d] = foodDate.split('-');
-    formattedDate = `${d}-${m}-${y}`;
+    formattedDate = `${d}/${m}/${y.slice(2)}`;
   }
 
   // A4 dimensions: 210 x 297 mm
@@ -30,103 +32,80 @@ export function generateFoodRequestLetterPdf(
 
   // ==========================================
   // PAGE 1: OFFICIAL FOOD REQUEST LETTER
-  // (College letterhead header removed as requested)
   // ==========================================
 
-  // Date (Right aligned)
+  // Date (Right aligned: "DATE: DD/MM/YY")
   cursorY += 5;
   doc.setFont('times', 'normal');
   doc.setFontSize(11);
-  doc.text(`Date: ${formattedDate}`, 210 - marginX, cursorY, { align: 'right' });
+  doc.text(`DATE: ${formattedDate}`, 210 - marginX, cursorY, { align: 'right' });
 
   // FROM Section
   cursorY += 8;
-  doc.setFont('times', 'bold');
-  doc.text('FROM:', marginX, cursorY);
+  doc.setFont('times', 'normal');
+  doc.text('FROM,', marginX, cursorY);
 
   cursorY += 6;
+  doc.setFont('times', 'bold');
+  doc.text(representativeName || '____________________', marginX, cursorY);
+  cursorY += 5;
   doc.setFont('times', 'normal');
-  doc.text(fromName || '[From Name]', marginX, cursorY);
+  doc.text(representativeRollNo || (representativeName ? '' : '____________________'), marginX, cursorY);
   cursorY += 5;
-  doc.text('Incubation Centre', marginX, cursorY);
+  doc.text('Sri Sai Ram Engineering College', marginX, cursorY);
   cursorY += 5;
-  doc.text('Sri Sairam Engineering College', marginX, cursorY);
+  doc.text('Chennai – 44', marginX, cursorY);
 
   // TO Section
   cursorY += 10;
-  doc.setFont('times', 'bold');
-  doc.text('TO:', marginX, cursorY);
+  doc.setFont('times', 'normal');
+  doc.text('TO,', marginX, cursorY);
 
   cursorY += 6;
-  doc.setFont('times', 'normal');
   doc.text('The Principal', marginX, cursorY);
   cursorY += 5;
-  doc.text('Sri Sairam Engineering College', marginX, cursorY);
+  doc.text('Sri Sai Ram Engineering College', marginX, cursorY);
   cursorY += 5;
-  doc.text('West Tambaram, Chennai', marginX, cursorY);
+  doc.text('Chennai – 44', marginX, cursorY);
 
   // SUBJECT
   cursorY += 12;
-  doc.setFont('times', 'bold');
-  doc.text('SUBJECT:', marginX, cursorY);
-  const subjectText = 'Request for Food Arrangement for Night-Stay Students';
-  doc.text(subjectText, marginX + 22, cursorY);
-
-  // RESPECTED SIR
-  cursorY += 12;
-  doc.setFont('times', 'bold');
-  doc.text('RESPECTED SIR,', marginX, cursorY);
-
-  // Body paragraphs
-  cursorY += 7;
   doc.setFont('times', 'normal');
-  const para1 =
-    'I kindly request you to arrange food facilities for the students who are staying at the college for night stay.';
-  doc.text(para1, marginX, cursorY, { maxWidth: 210 - marginX * 2 });
+  const subjectLine = `sub: Request for Night stay in Incubation on ${formattedDate}`;
+  doc.text(subjectLine, marginX, cursorY);
 
-  cursorY += 10;
-  doc.text('The required food arrangements are requested for:', marginX, cursorY);
+  // SALUTATION
+  cursorY += 12;
+  doc.setFont('times', 'normal');
+  doc.text('Respected Sir,', marginX, cursorY);
 
-  cursorY += 6;
-  doc.text('1.  Dinner', marginX + 8, cursorY);
-  cursorY += 5;
-  doc.text("2.  Next day's Breakfast", marginX + 8, cursorY);
-  cursorY += 5;
-  doc.text("3.  Next day's Lunch", marginX + 8, cursorY);
-
-  cursorY += 9;
-  const para2 = 'Kindly make the necessary arrangements for the above-mentioned students.';
-  doc.text(para2, marginX, cursorY, { maxWidth: 210 - marginX * 2 });
-
+  // BODY
   cursorY += 7;
-  const para3 =
-    'The list of students requiring food arrangements is provided on the following page for your reference.';
-  doc.text(para3, marginX, cursorY, { maxWidth: 210 - marginX * 2 });
+  const projectsList = projectsText || '__________________________________';
+  const bodyText = `Our Incubation teams has involved in ${projectsList}. So, I request you to give permission for night stay on ${formattedDate}. I also request you to provide food tokens. The student's list is attached with this letter.`;
+  
+  doc.text(bodyText, marginX, cursorY, {
+    maxWidth: 210 - marginX * 2,
+    lineHeightFactor: 1.5,
+  });
 
-  cursorY += 9;
-  doc.text('Thank you for your kind consideration and support.', marginX, cursorY);
-
-  // Sign-off (Left: Incubation Centre, Right: Principal)
-  cursorY += 14;
+  // SIGN-OFF (Right aligned: "Yours Truly,")
+  cursorY += 45;
   const rightX = 210 - marginX;
 
   doc.setFont('times', 'normal');
   doc.setFontSize(11);
-  doc.text('Yours faithfully,', marginX, cursorY);
-  doc.text('Approved by,', rightX, cursorY, { align: 'right' });
+  doc.text('Yours Truly,', rightX, cursorY, { align: 'right' });
 
-  cursorY += 16;
+  cursorY += 22; // Space for physical signature
   doc.setFont('times', 'bold');
-  doc.text(fromName || '[From Name]', marginX, cursorY);
-  doc.text('Principal', rightX, cursorY, { align: 'right' });
-
-  cursorY += 5;
-  doc.setFont('times', 'normal');
-  doc.text('Incubation Centre', marginX, cursorY);
-  doc.text('Sri Sairam Engineering College', rightX, cursorY, { align: 'right' });
-
-  cursorY += 5;
-  doc.text('Sri Sairam Engineering College', marginX, cursorY);
+  doc.text(representativeName || '____________________', rightX, cursorY, { align: 'right' });
+  
+  if (representativeRollNo) {
+    cursorY += 5;
+    doc.setFont('times', 'normal');
+    doc.text(representativeRollNo, rightX, cursorY, { align: 'right' });
+  }
 
   // Footer for Page 1
   doc.setFontSize(9);
@@ -136,8 +115,7 @@ export function generateFoodRequestLetterPdf(
 
   // ==========================================
   // PAGE 2: STUDENT DETAILS TABLE
-  // (College header removed as requested - only list of students alone)
-  // (Compact row width and padding so 20+ names fit easily without congestion)
+  // (Attachment: List of Students)
   // ==========================================
   doc.addPage('a4', 'portrait');
 
@@ -164,7 +142,7 @@ export function generateFoodRequestLetterPdf(
     st.studentId,
   ]);
 
-  // Centered compact table: 140mm wide (left margin = (210 - 140) / 2 = 35mm)
+  // Centered compact table: 140mm wide
   const tableMarginX = 35;
 
   autoTable(doc, {
@@ -177,7 +155,7 @@ export function generateFoodRequestLetterPdf(
       font: 'helvetica',
       fontSize: 9.5,
       textColor: [30, 41, 59],
-      cellPadding: 2.2, // Low height per row so 20 names fit comfortably
+      cellPadding: 2.2,
       lineColor: [203, 213, 225],
       lineWidth: 0.2,
       minCellHeight: 6.5,

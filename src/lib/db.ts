@@ -23,15 +23,15 @@ const initialProjects = [
 ];
 
 const initialStudents = [
-  { id: '23CS101', name: 'Siddharth V', department: 'CSE', year: 3, email: 'siddharth@college.edu', phone: '9876543210', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS102', name: 'Fayas K', department: 'CSE', year: 3, email: 'fayas@college.edu', phone: '9876543211', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS103', name: 'Nirmal E', department: 'CSE', year: 3, email: 'nirmal@college.edu', phone: '9876543212', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS104', name: 'Arun Kumar', department: 'CSE', year: 3, email: 'arun@college.edu', phone: '9876543213', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS105', name: 'Priya S', department: 'CSE', year: 3, email: 'priya@college.edu', phone: '9876543214', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23ME101', name: 'Rahul M', department: 'ME', year: 2, email: 'rahul@college.edu', phone: '9876543215', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23EC101', name: 'Kavya R', department: 'ECE', year: 2, email: 'kavya@college.edu', phone: '9876543216', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '22CS201', name: 'Deepak N', department: 'CSE', year: 4, email: 'deepak@college.edu', phone: '9876543217', status: 'Inactive', createdAt: new Date(), updatedAt: new Date() },
-  { id: 'SEC24CS110', name: 'Karthikeyan S', department: 'CSE', year: 1, email: 'karthikeyan.s@sairam.edu.in', phone: '9876543220', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS101', name: 'Siddharth V', department: 'Computer Science and Engineering', year: 3, email: 'siddharth@college.edu', phone: '9876543210', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS102', name: 'Fayas K', department: 'Computer Science and Engineering', year: 3, email: 'fayas@college.edu', phone: '9876543211', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS103', name: 'Nirmal E', department: 'Computer Science and Engineering', year: 3, email: 'nirmal@college.edu', phone: '9876543212', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS104', name: 'Arun Kumar', department: 'Computer Science and Engineering', year: 3, email: 'arun@college.edu', phone: '9876543213', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS105', name: 'Priya S', department: 'Computer Science and Engineering', year: 3, email: 'priya@college.edu', phone: '9876543214', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23ME101', name: 'Rahul M', department: 'Mechanical Engineering', year: 2, email: 'rahul@college.edu', phone: '9876543215', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23EC101', name: 'Kavya R', department: 'Electronics and Communication Engineering', year: 2, email: 'kavya@college.edu', phone: '9876543216', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '22CS201', name: 'Deepak N', department: 'Computer Science and Engineering', year: 4, email: 'deepak@college.edu', phone: '9876543217', status: 'Inactive', createdAt: new Date(), updatedAt: new Date() },
+  { id: 'SEC24CS110', name: 'Karthikeyan S', department: 'Computer Science and Engineering', year: 1, email: 'karthikeyan.s@sairam.edu.in', phone: '9876543220', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
 ];
 
 const initialProjectMembers = [
@@ -149,8 +149,32 @@ function getRealPrisma(): PrismaClient | null {
   if (!globalStore._prismaClient) {
     try {
       const client = new PrismaClient({
-        log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+        log: [
+          { emit: 'event', level: 'error' },
+          { emit: 'event', level: 'warn' },
+        ],
+      }) as any;
+
+      client.$on('error', (e: any) => {
+        const msg = e?.message || String(e);
+        // Benign idle connection recycling or transient network jitter handled by resilient proxy
+        if (
+          msg.includes('10054') ||
+          msg.includes('ConnectionReset') ||
+          msg.includes('forcibly closed') ||
+          msg.includes("Can't reach database server")
+        ) {
+          return;
+        }
+        console.error('[Prisma Client Error]', msg);
       });
+
+      client.$on('warn', (e: any) => {
+        const msg = e?.message || String(e);
+        if (msg.includes('10054') || msg.includes('ConnectionReset')) return;
+        console.warn('[Prisma Client Warn]', msg);
+      });
+
       globalStore._prismaClient = client;
 
       // Seed default staff user asynchronously if table is empty
@@ -173,10 +197,9 @@ function getRealPrisma(): PrismaClient | null {
       });
     } catch (e) {
       console.warn('PrismaClient failed to instantiate, using resilient store:', e);
-      return null;
     }
   }
-  return globalStore._prismaClient;
+  return globalStore._prismaClient || null;
 }
 
 export async function ensureDefaultStaffUser(): Promise<string> {
@@ -686,6 +709,13 @@ function isConnectionError(error: any): boolean {
     msg.includes("Can't reach database") ||
     msg.includes('closed the connection') ||
     msg.includes('ConnectionReset') ||
+    msg.includes('10054') ||
+    msg.includes('10053') ||
+    msg.includes('forcibly closed') ||
+    msg.includes('aborted') ||
+    msg.includes('wsarecv') ||
+    msg.includes('WSAECONNABORTED') ||
+    msg.includes('WSAECONNRESET') ||
     msg.includes('does not exist') ||
     msg.includes('ETIMEDOUT') ||
     msg.includes('ECONNREFUSED') ||
@@ -704,8 +734,26 @@ function createResilientModelProxy(modelName: string) {
             return await (realPrisma as any)[modelName][method](...args);
           } catch (error: any) {
             if (isConnectionError(error)) {
-              console.warn(`[Prisma ${modelName}.${method}] Connection dropped: ${error?.message || error}. Resetting connection and falling back to memory store.`);
+              console.warn(`[Prisma ${modelName}.${method}] Connection reset by remote host. Reconnecting to database...`);
+              if (globalStore._prismaClient) {
+                try {
+                  await globalStore._prismaClient.$disconnect().catch(() => {});
+                } catch {}
+              }
               globalStore._prismaClient = undefined;
+              
+              // Wait 250ms and retry query once with fresh connection
+              await new Promise(r => setTimeout(r, 250));
+              const freshClient = getRealPrisma();
+              if (freshClient && (freshClient as any)[modelName] && typeof (freshClient as any)[modelName][method] === 'function') {
+                try {
+                  const retryRes = await (freshClient as any)[modelName][method](...args);
+                  console.log(`[Prisma ${modelName}.${method}] ✓ Reconnect successful, query recovered.`);
+                  return retryRes;
+                } catch (retryErr: any) {
+                  console.warn(`[Prisma ${modelName}.${method}] Reconnect retry failed, falling back:`, retryErr?.message || retryErr);
+                }
+              }
             } else {
               // Business validation error (e.g. P2002 Unique Constraint) -> rethrow for action handling
               throw error;
@@ -734,8 +782,24 @@ export const prisma: any = new Proxy({}, {
             return await realPrisma.$transaction(arg);
           } catch (error: any) {
             if (isConnectionError(error)) {
-              console.warn('[Prisma $transaction] Connection dropped, resetting:', error?.message || error);
+              console.warn('[Prisma $transaction] Connection reset, reconnecting...');
+              if (globalStore._prismaClient) {
+                try {
+                  await globalStore._prismaClient.$disconnect().catch(() => {});
+                } catch {}
+              }
               globalStore._prismaClient = undefined;
+              await new Promise(r => setTimeout(r, 250));
+              const freshClient = getRealPrisma();
+              if (freshClient) {
+                try {
+                  const res = await freshClient.$transaction(arg);
+                  console.log('[Prisma $transaction] ✓ Reconnect successful, transaction recovered.');
+                  return res;
+                } catch (retryErr: any) {
+                  console.warn('[Prisma $transaction] Retry failed, falling back:', retryErr?.message || retryErr);
+                }
+              }
             } else {
               throw error;
             }

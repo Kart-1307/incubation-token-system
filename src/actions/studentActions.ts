@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
+import { normalizeDepartmentName } from '@/utils/departmentUtils';
 
 export interface StudentRecord {
   id: string;
@@ -36,7 +37,7 @@ export async function getStudents(): Promise<StudentRecord[]> {
       return list.map((s: any) => ({
         id: s.id,
         name: s.name,
-        department: s.department,
+        department: normalizeDepartmentName(s.department),
         year: s.year,
         email: s.email,
         phone: s.phone,
@@ -91,11 +92,13 @@ export async function createStudent(data: {
       return { success: false, message: `Student ID ${id} already exists in registry.` };
     }
 
+    const canonicalDept = normalizeDepartmentName(data.department);
+
     const created = await prisma.student.create({
       data: {
         id,
         name,
-        department: data.department || 'CSE',
+        department: canonicalDept,
         year: Number(data.year) || 1,
         email,
         phone: data.phone || null,

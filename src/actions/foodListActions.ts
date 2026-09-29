@@ -3,6 +3,7 @@
 import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
+import { normalizeDepartmentName } from '@/utils/departmentUtils';
 
 export interface FoodListEntry {
   studentId: string;
@@ -46,7 +47,7 @@ export async function getDailyFoodList(dateInput?: string): Promise<FoodListDeta
       const entries: FoodListEntry[] = eligibilities.map((e: any) => ({
         studentId: e.studentId,
         studentName: e.student?.name || e.studentId,
-        department: e.student?.department || '—',
+        department: normalizeDepartmentName(e.student?.department),
         year: e.student?.year || 0,
         projectCode: e.projectCode,
         projectName: e.project?.name || e.projectCode,
@@ -72,6 +73,122 @@ export async function getDailyFoodList(dateInput?: string): Promise<FoodListDeta
       };
     }
   }, ['foodlist']);
+}
+
+export async function scanStudentIntoDailyFoodList(
+  studentIdInput: string,
+  targetDate?: string,
+  addedBy: string = 'Scanner / Desk'
+): Promise<{
+  success: boolean;
+  message: string;
+  alreadyAdded?: boolean;
+  notFound?: boolean;
+  student?: { id: string; name: string; department: string; year: number };
+  project?: string;
+}> {
+  const studentId = (studentIdInput || '').trim().toUpperCase();
+  const date = targetDate || new Date().toISOString().split('T')[0];
+
+  if (!studentId) {
+    return { success: false, message: 'Student ID cannot be empty.' };
+  }
+
+  try {
+    // 1. Verify student exists in student master
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+    });
+    if (!student) {
+      return { success: false, notFound: true, message: `Student ID "${studentId}" not found in institutional registry.` };
+    }
+
+    // 2. Check if already on today's food list
+    const existing = await prisma.dailyFoodEligibility.findUnique({
+      where: {
+        date_studentId: {
+          date,
+          studentId,
+        },
+      },
+      include: { project: true },
+    });
+
+    if (existing) {
+      return {
+        success: false,
+        alreadyAdded: true,
+        student: {
+          id: student.id,
+          name: student.name,
+          department: student.department,
+          year: student.year,
+        },
+        project: existing.project?.name || existing.projectCode,
+        message: `${student.name} (${studentId}) is already on the food list for ${date}.`,
+      };
+    }
+
+    // 3. Find student's assigned project automatically
+    let projectCode = '';
+    let projectName = '';
+    const pm = await prisma.projectMember.findFirst({
+      where: { studentId },
+      include: { project: true },
+    });
+
+    if (pm && pm.project) {
+      projectCode = pm.projectCode;
+      projectName = pm.project.name;
+    } else {
+      const firstProject = await prisma.project.findFirst({ where: { status: 'Active' } });
+      projectCode = firstProject ? firstProject.code : 'INC-GENERAL';
+      projectName = firstProject ? firstProject.name : 'Incubation Team';
+    }
+
+    // 4. Ensure daily food list header exists
+    const createdById = await ensureDefaultStaffUser();
+    await prisma.dailyFoodList.upsert({
+      where: { date },
+      update: {},
+      create: {
+        date,
+        status: 'Draft',
+        createdById,
+      },
+    });
+
+    // 5. Create food eligibility entry (STRICTLY NO TOKEN ISSUED)
+    await prisma.dailyFoodEligibility.create({
+      data: {
+        date,
+        studentId,
+        projectCode,
+        addedBy,
+        status: 'Eligible',
+      },
+    });
+
+    appCache.invalidateTags(['foodlist', 'dashboard']);
+    revalidatePath('/daily-food-list');
+    revalidatePath('/dashboard');
+    revalidatePath('/scan-token');
+
+    return {
+      success: true,
+      message: `✓ Added ${student.name} (${studentId}) to Food List.`,
+      student: {
+        id: student.id,
+        name: student.name,
+        department: student.department,
+        year: student.year,
+      },
+      project: projectName,
+    };
+  } catch (error) {
+    console.error('Error scanning student into daily list:', error);
+    return { success: false, message: 'Server error while adding student to food list.' };
+  }
 }
 
 export async function addStudentToDailyList(
@@ -198,12 +315,10 @@ export async function removeStudentFromDailyList(
 ): Promise<{ success: boolean; message: string }> {
   const studentId = studentIdInput.trim().toUpperCase();
   try {
-    await prisma.dailyFoodEligibility.delete({
+    const res = await prisma.dailyFoodEligibility.deleteMany({
       where: {
-        date_studentId: {
-          date,
-          studentId,
-        },
+        date,
+        studentId,
       },
     });
 
@@ -211,6 +326,11 @@ export async function removeStudentFromDailyList(
     revalidatePath('/daily-food-list');
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
+
+    if (res.count === 0) {
+      return { success: true, message: 'Student was already removed from food list.' };
+    }
+
     return { success: true, message: 'Student removed from food list.' };
   } catch (error) {
     console.error('Error removing student from daily list:', error);

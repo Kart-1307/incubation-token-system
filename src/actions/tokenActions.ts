@@ -3,6 +3,7 @@
 import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession } from '@/utils/timeUtils';
+import { normalizeDepartmentName } from '@/utils/departmentUtils';
 import { revalidatePath } from 'next/cache';
 
 export interface IssueTokenResult {
@@ -401,6 +402,8 @@ export async function getFoodTokens(date?: string) {
           tokenNumber: t.tokenNumber,
           studentId: t.studentId,
           studentName: t.student?.name || t.studentId,
+          department: normalizeDepartmentName(t.student?.department),
+          year: t.student?.year ? `Year ${t.student.year}` : '—',
           project: t.project?.name || t.projectCode || '—',
           date: t.date,
           time: issuedDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),

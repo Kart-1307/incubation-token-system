@@ -1,22 +1,63 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { getMealSession } from '@/utils/timeUtils';
 
-type ScanStatus = 'idle' | 'scanning' | 'verifying' | 'success' | 'duplicate' | 'ineligible' | 'not-found' | 'error';
+type ScanStatus =
+  | 'idle'
+  | 'scanning'
+  | 'verifying'
+  | 'success'
+  | 'duplicate'
+  | 'ineligible'
+  | 'not-found'
+  | 'error'
+  | 'food-list-added'
+  | 'food-list-duplicate';
 
 interface ScanResultData {
   tokenNumber?: string;
   studentName?: string;
   studentId?: string;
+  department?: string;
+  year?: number | string;
   session?: string;
   project?: string;
   message?: string;
 }
 
+// Module-level cached import promise to eliminate delay on camera start
+let html5QrcodePromise: Promise<any> | null = null;
+function getHtml5QrcodeModule() {
+  if (!html5QrcodePromise && typeof window !== 'undefined') {
+    html5QrcodePromise = import('html5-qrcode');
+  }
+  return html5QrcodePromise;
+}
+
 export default function MobileScanPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6 text-center">
+          <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-xs text-slate-400">Loading scanner engine...</p>
+        </div>
+      }
+    >
+      <MobileScanContent />
+    </Suspense>
+  );
+}
+
+function MobileScanContent() {
+  const searchParams = useSearchParams();
+  const urlMode = searchParams.get('mode') === 'intake' ? 'intake' : 'token';
+
+  const [scanMode, setScanMode] = useState<'token' | 'intake'>(urlMode);
   const [status, setStatus] = useState<ScanStatus>('idle');
-  const [statusMessage, setStatusMessage] = useState<string>('Initializing Camera...');
+  const [statusMessage, setStatusMessage] = useState<string>('Ready to start camera');
   const [lastScannedCode, setLastScannedCode] = useState<string>('');
   const [resultData, setResultData] = useState<ScanResultData | null>(null);
   const [torchOn, setTorchOn] = useState(false);
@@ -33,15 +74,17 @@ export default function MobileScanPage() {
 
   const statusRef = useRef<ScanStatus>(status);
   const resultDataRef = useRef<ScanResultData | null>(resultData);
+  const scanModeRef = useRef<'token' | 'intake'>(scanMode);
   const lastScanTimeRef = useRef<number>(0);
   const lastScannedCodeRef = useRef<string>('');
 
   useEffect(() => {
     statusRef.current = status;
     resultDataRef.current = resultData;
-  }, [status, resultData]);
+    scanModeRef.current = scanMode;
+  }, [status, resultData, scanMode]);
 
-  // Synthesize audio feedback via Web Audio API
+  // Synthesize audio feedback via Web Audio API (instant, no external file download)
   const playSound = useCallback((type: 'success' | 'warning' | 'error') => {
     try {
       if (!audioCtxRef.current) {
@@ -80,9 +123,7 @@ export default function MobileScanPage() {
         osc.start();
         osc.stop(ctx.currentTime + 0.35);
       }
-    } catch (e) {
-      // Audio autoplay policy fallback
-    }
+    } catch {}
   }, []);
 
   const triggerVibration = (pattern: number[]) => {
@@ -93,102 +134,153 @@ export default function MobileScanPage() {
     }
   };
 
-  const handleBarcodeDecoded = useCallback(async (decodedText: string) => {
-    const cleanCode = decodedText.trim().toUpperCase();
-    if (!cleanCode || isProcessingRef.current) return;
+  const handleBarcodeDecoded = useCallback(
+    async (decodedText: string) => {
+      const cleanCode = decodedText.trim().toUpperCase();
+      if (!cleanCode || isProcessingRef.current) return;
 
-    // 1. If currently displaying an active token for THIS SAME student, hold the screen and ignore repeat frames
-    if (statusRef.current === 'success' && resultDataRef.current?.studentId === cleanCode) {
-      return;
-    }
-
-    // 2. Throttle repeat scanning of the exact same code within 2 seconds
-    const now = Date.now();
-    if (cleanCode === lastScannedCodeRef.current && now - lastScanTimeRef.current < 2000) {
-      return;
-    }
-
-    lastScannedCodeRef.current = cleanCode;
-    lastScanTimeRef.current = now;
-    isProcessingRef.current = true;
-    setStatus('verifying');
-    setLastScannedCode(cleanCode);
-    setStatusMessage(`Verifying student ${cleanCode} with database...`);
-
-    try {
-      const res = await fetch('/api/scan-submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: cleanCode }),
-      });
-
-      const data = await res.json();
-
-      if (data.status === 'TOKEN_ISSUED') {
-        setStatus('success');
-        setResultData({
-          tokenNumber: data.token?.tokenNumber,
-          studentName: data.token?.studentName,
-          studentId: data.token?.studentId,
-          session: data.token?.session || sessionName,
-          project: data.token?.project,
-          message: data.message,
-        });
-        setStatusMessage(`Token ${data.token?.tokenNumber} Active · Ready for next scan`);
-        playSound('success');
-        triggerVibration([100, 50, 100]);
-      } else if (data.status === 'DUPLICATE') {
-        setStatus('duplicate');
-        setResultData({
-          tokenNumber: data.existingToken?.tokenNumber,
-          studentName: data.student?.name,
-          studentId: cleanCode,
-          session: data.existingToken?.session || sessionName,
-          message: data.message,
-        });
-        setStatusMessage(data.message || 'Token already issued for this session!');
-        playSound('warning');
-        triggerVibration([200, 100, 200]);
-      } else if (data.status === 'INELIGIBLE') {
-        setStatus('ineligible');
-        setResultData({
-          studentName: data.student?.name,
-          studentId: cleanCode,
-          message: data.message,
-        });
-        setStatusMessage(data.message || 'Student is not on today’s finalized food list.');
-        playSound('error');
-        triggerVibration([300]);
-      } else {
-        setStatus('not-found');
-        setResultData({
-          studentId: cleanCode,
-          message: data.message || 'Student ID not found in database.',
-        });
-        setStatusMessage(data.message || 'Student ID not found in database.');
-        playSound('error');
-        triggerVibration([300]);
+      // 1. Throttle repeat scanning of the exact same student within 2.5 seconds
+      const now = Date.now();
+      if (cleanCode === lastScannedCodeRef.current && now - lastScanTimeRef.current < 2500) {
+        return;
       }
-    } catch (err) {
-      console.error(err);
-      setStatus('error');
-      setStatusMessage('Network error submitting scan.');
-      playSound('error');
-    } finally {
-      isProcessingRef.current = false;
-    }
-  }, [playSound, sessionName]);
 
-// Pre-warm scanner module in memory to eliminate download latency on tap
-let html5QrcodePromise: Promise<any> | null = null;
-function getHtml5QrcodeModule() {
-  if (!html5QrcodePromise && typeof window !== 'undefined') {
-    html5QrcodePromise = import('html5-qrcode');
-  }
-  return html5QrcodePromise;
-}
+      lastScannedCodeRef.current = cleanCode;
+      lastScanTimeRef.current = now;
+      isProcessingRef.current = true;
+      setStatus('verifying');
+      setLastScannedCode(cleanCode);
 
-  // Start Scanner with instant preloaded engine, 1080p HD, and native BarcodeDetector
+      const currentMode = scanModeRef.current;
+      setStatusMessage(
+        currentMode === 'intake'
+          ? `Adding ${cleanCode} to Food List...`
+          : `Verifying ${cleanCode} for Token...`
+      );
+
+      try {
+        const res = await fetch('/api/scan-submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentId: cleanCode,
+            mode: currentMode,
+          }),
+        });
+
+        const data = await res.json();
+
+        // =====================================================================
+        // MODE 1: FOOD LIST INTAKE RESPONSES (ZERO TOKENS GENERATED)
+        // =====================================================================
+        if (currentMode === 'intake') {
+          if (data.status === 'FOOD_LIST_ADDED') {
+            setStatus('food-list-added');
+            setResultData({
+              studentId: data.student?.id || cleanCode,
+              studentName: data.student?.name || cleanCode,
+              department: data.student?.department,
+              year: data.student?.year,
+              project: data.project,
+              message: data.message,
+            });
+            setStatusMessage(`Added to Food List: ${data.student?.name || cleanCode}`);
+            playSound('success');
+            triggerVibration([100, 50, 100]);
+          } else if (data.status === 'FOOD_LIST_DUPLICATE') {
+            setStatus('food-list-duplicate');
+            setResultData({
+              studentId: data.student?.id || cleanCode,
+              studentName: data.student?.name,
+              project: data.project,
+              message: data.message,
+            });
+            setStatusMessage(data.message || 'Already added to today’s food list');
+            playSound('warning');
+            triggerVibration([150, 80, 150]);
+          } else if (data.status === 'NOT_FOUND') {
+            setStatus('not-found');
+            setResultData({
+              studentId: cleanCode,
+              message: data.message || 'Student Roll ID not found in database.',
+            });
+            setStatusMessage(data.message || 'Student not found in registry.');
+            playSound('error');
+            triggerVibration([300]);
+          } else {
+            setStatus('error');
+            setResultData({
+              studentId: cleanCode,
+              message: data.message || 'Could not add student to food list.',
+            });
+            setStatusMessage(data.message || 'Failed to add student to food list.');
+            playSound('error');
+            triggerVibration([300]);
+          }
+          return;
+        }
+
+        // =====================================================================
+        // MODE 2: TOKEN MODE RESPONSES
+        // =====================================================================
+        if (data.status === 'TOKEN_ISSUED') {
+          setStatus('success');
+          setResultData({
+            tokenNumber: data.token?.tokenNumber,
+            studentName: data.token?.studentName,
+            studentId: data.token?.studentId,
+            session: data.token?.session || sessionName,
+            project: data.token?.project,
+            message: data.message,
+          });
+          setStatusMessage(`Token ${data.token?.tokenNumber} Active · Ready for next scan`);
+          playSound('success');
+          triggerVibration([100, 50, 100]);
+        } else if (data.status === 'DUPLICATE') {
+          setStatus('duplicate');
+          setResultData({
+            tokenNumber: data.existingToken?.tokenNumber,
+            studentName: data.student?.name,
+            studentId: cleanCode,
+            session: data.existingToken?.session || sessionName,
+            message: data.message,
+          });
+          setStatusMessage(data.message || 'Token already issued for this session!');
+          playSound('warning');
+          triggerVibration([200, 100, 200]);
+        } else if (data.status === 'INELIGIBLE') {
+          setStatus('ineligible');
+          setResultData({
+            studentName: data.student?.name,
+            studentId: cleanCode,
+            message: data.message,
+          });
+          setStatusMessage(data.message || 'Student is not on today’s finalized food list.');
+          playSound('error');
+          triggerVibration([300]);
+        } else {
+          setStatus('not-found');
+          setResultData({
+            studentId: cleanCode,
+            message: data.message || 'Student ID not found in database.',
+          });
+          setStatusMessage(data.message || 'Student ID not found in database.');
+          playSound('error');
+          triggerVibration([300]);
+        }
+      } catch (err) {
+        console.error(err);
+        setStatus('error');
+        setStatusMessage('Network error submitting scan.');
+        playSound('error');
+      } finally {
+        isProcessingRef.current = false;
+      }
+    },
+    [playSound, sessionName]
+  );
+
+  // Start Scanner directly with exact hardware deviceId from getCameras() without testStream collision
   const startScanner = useCallback(async () => {
     setCameraStarting(true);
     setPermissionDenied(false);
@@ -203,14 +295,40 @@ function getHtml5QrcodeModule() {
         return;
       }
 
-      // 1. Instantly get pre-warmed library (0ms network delay)
-      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await (getHtml5QrcodeModule() || import('html5-qrcode'));
-
-      // Clean up previous instance if running
+      // 1. Complete teardown of previous instance and DOM cleanup to free camera HAL
       if (scannerRef.current) {
         try {
           await scannerRef.current.stop();
         } catch {}
+        try {
+          await scannerRef.current.clear();
+        } catch {}
+        scannerRef.current = null;
+      }
+
+      const container = document.getElementById('mobile-qr-reader');
+      if (container) {
+        container.innerHTML = '';
+      }
+
+      // 2. Load Html5Qrcode module
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await (getHtml5QrcodeModule() || import('html5-qrcode'));
+
+      // 3. Request permissions and query hardware cameras directly
+      let devices: any[] = [];
+      try {
+        devices = await Html5Qrcode.getCameras();
+      } catch (camErr: any) {
+        console.warn('getCameras error:', camErr);
+        const errName = camErr?.name || '';
+        const errMsg = camErr?.message || String(camErr);
+        if (errName === 'NotAllowedError' || errMsg.toLowerCase().includes('permission denied')) {
+          setPermissionDenied(true);
+          setStatus('error');
+          setStatusMessage('Camera permission blocked. Tap lock icon in address bar to Allow.');
+          setCameraStarting(false);
+          return;
+        }
       }
 
       const scannerId = 'mobile-qr-reader';
@@ -224,66 +342,58 @@ function getHtml5QrcodeModule() {
         ],
         verbose: false,
         experimentalFeatures: {
-          // Native hardware GPU acceleration on iOS Safari & Android Chrome
-          useBarCodeDetectorIfSupported: true,
+          useBarCodeDetectorIfSupported: true, // Native C++ BarcodeDetector on Chrome / Safari
         },
       });
       scannerRef.current = scanner;
 
-      // 1080p Full HD camera constraints with continuous auto-focus for sharp ID barcode lines
-      const cameraConstraints = {
-        facingMode: { ideal: cameraFacing },
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
-      };
-
       const config = {
-        fps: 15, // Optimal 15 fps: silky smooth, zero CPU throttling, maximum decode accuracy
-        qrbox: undefined, // Scans across full sensor view
-        videoConstraints: cameraConstraints,
+        fps: 15,
+        qrbox: undefined, // Scan full viewfinder area
       };
 
       const onScanSuccess = (decodedText: string) => {
         handleBarcodeDecoded(decodedText);
       };
 
-      // Try 1: High-definition continuous auto-focus rear camera
-      try {
+      // 4. Start with exact back-camera hardware ID
+      let started = false;
+      if (devices && devices.length > 0) {
+        const backCamera =
+          devices.find((d: any) => {
+            const label = (d.label || '').toLowerCase();
+            return label.includes('back') || label.includes('rear') || label.includes('environment');
+          }) || (devices.length > 1 ? devices[devices.length - 1] : devices[0]);
+
+        try {
+          await scanner.start(backCamera.id, config, onScanSuccess, () => {});
+          started = true;
+        } catch (idErr) {
+          console.warn('Direct deviceId start failed, trying facingMode fallback:', idErr);
+        }
+      }
+
+      // Fallback to facingMode if deviceId not available or failed
+      if (!started) {
         await scanner.start(
-          cameraConstraints,
+          { facingMode: cameraFacing },
           config,
           onScanSuccess,
           () => {}
         );
-      } catch (err1) {
-        console.warn('High-res start failed, falling back to basic facingMode:', err1);
-        // Try 2: Standard facingMode fallback
-        try {
-          await scanner.start(
-            { facingMode: cameraFacing },
-            { fps: 15, qrbox: undefined },
-            onScanSuccess,
-            () => {}
-          );
-        } catch (err2) {
-          // Try 3: Query device camera list
-          const cameras = await Html5Qrcode.getCameras();
-          if (cameras && cameras.length > 0) {
-            const backCam = cameras.find((c: any) =>
-              (c.label || '').toLowerCase().includes('back') ||
-              (c.label || '').toLowerCase().includes('rear') ||
-              (c.label || '').toLowerCase().includes('environment')
-            ) || cameras[cameras.length - 1];
-            await scanner.start(backCam.id, config, onScanSuccess, () => {});
-          } else {
-            await scanner.start({ facingMode: 'user' }, config, onScanSuccess, () => {});
-          }
-        }
+      }
+
+      // Ensure video element plays inline on mobile Safari/Chrome
+      const videoEl = document.querySelector('#mobile-qr-reader video') as HTMLVideoElement | null;
+      if (videoEl) {
+        videoEl.setAttribute('playsinline', 'true');
+        videoEl.setAttribute('webkit-playsinline', 'true');
+        videoEl.muted = true;
       }
 
       setCameraActive(true);
       setStatus('scanning');
-      setStatusMessage('Camera active · Point at ID barcode');
+      setStatusMessage('Camera active · Point at student ID card');
     } catch (err: any) {
       console.error('Camera init error:', err);
       const errName = err?.name || '';
@@ -301,18 +411,41 @@ function getHtml5QrcodeModule() {
     }
   }, [cameraFacing, handleBarcodeDecoded]);
 
-  // Pre-warm scanner on mount; avoid auto-start on mobile to prevent OS gesture permission hang
+  // Pre-warm module, check granted permission, and release camera on tab hide
   useEffect(() => {
-    // Pre-warm scanner module in memory immediately
     getHtml5QrcodeModule();
 
-    const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (!isMobile) {
-      // Auto-start on desktop only
-      startScanner();
+    // Auto-start if permission was already granted previously
+    if (typeof navigator !== 'undefined' && (navigator as any).permissions?.query) {
+      (navigator as any).permissions
+        .query({ name: 'camera' })
+        .then((perm: any) => {
+          if (perm.state === 'granted') {
+            startScanner();
+          }
+        })
+        .catch(() => {});
     }
 
+    // Release camera hardware sensor immediately when user switches tabs or minimizes browser
+    const handleVisibilityChange = () => {
+      if (document.hidden && scannerRef.current) {
+        scannerRef.current.stop().catch(() => {}).then(() => {
+          scannerRef.current?.clear();
+          scannerRef.current = null;
+          setCameraActive(false);
+          setStatus('idle');
+          setStatusMessage('Camera paused. Tap to start.');
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handleVisibilityChange);
       if (scannerRef.current) {
         scannerRef.current.stop().catch(() => {}).then(() => {
           scannerRef.current?.clear();
@@ -329,7 +462,6 @@ function getHtml5QrcodeModule() {
         await track.torchFeature().apply(!torchOn);
         setTorchOn(!torchOn);
       } else {
-        // Fallback using direct stream track
         const stream = (scannerRef.current as any)?.localMediaStream;
         const videoTrack = stream?.getVideoTracks()?.[0];
         if (videoTrack?.applyConstraints) {
@@ -355,16 +487,24 @@ function getHtml5QrcodeModule() {
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between selection:bg-indigo-500 font-sans">
       {/* Top Header Bar */}
-      <header className="p-4 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between sticky top-0 z-20">
+      <header className="p-3.5 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 flex items-center justify-between sticky top-0 z-20">
         <div>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <h1 className="font-bold text-sm tracking-wide text-white">SAIRAM INCUBATION SCANNER</h1>
+            <span
+              className={`w-2.5 h-2.5 rounded-full animate-pulse ${
+                scanMode === 'intake' ? 'bg-sky-400' : 'bg-emerald-400'
+              }`}
+            />
+            <h1 className="font-bold text-xs tracking-wide text-white uppercase">
+              {scanMode === 'intake' ? 'Food List Intake Scanner' : 'Mess Token Terminal'}
+            </h1>
           </div>
-          <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+          <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5 font-mono">
             <span>Session: <strong className="text-amber-400 uppercase">{sessionName}</strong></span>
             <span>·</span>
-            <span>Mobile Verifier</span>
+            <span className={scanMode === 'intake' ? 'text-sky-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+              {scanMode === 'intake' ? 'Eligibility Desk' : 'Meal Token Issue'}
+            </span>
           </div>
         </div>
 
@@ -397,20 +537,75 @@ function getHtml5QrcodeModule() {
         </div>
       </header>
 
+      {/* Mode Switcher Banner */}
+      <div className="px-4 py-2 bg-slate-900 border-b border-slate-800">
+        <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800/80">
+          <button
+            onClick={() => {
+              setScanMode('intake');
+              setStatus('idle');
+              setStatusMessage('Switched to Food List Intake Mode (Zero Tokens)');
+            }}
+            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              scanMode === 'intake'
+                ? 'bg-sky-600 text-white shadow-sm ring-1 ring-sky-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>📋</span>
+            <span>Food List Mode</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setScanMode('token');
+              setStatus('idle');
+              setStatusMessage('Switched to Meal Token Mode');
+            }}
+            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              scanMode === 'token'
+                ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>🎟️</span>
+            <span>Meal Token Mode</span>
+          </button>
+        </div>
+
+        <div className="mt-1.5 text-center">
+          <span className="text-[10px] text-slate-400">
+            {scanMode === 'intake' ? (
+              <span className="text-sky-300">
+                Scanned students are added to today’s food list.
+              </span>
+            ) : (
+              <span className="text-emerald-300">
+                ⚡ <strong>Mess Counter:</strong> Issues meal tokens for students already on the food list.
+              </span>
+            )}
+          </span>
+        </div>
+      </div>
+
       {/* Main Viewfinder Center */}
       <main className="relative flex-1 flex flex-col items-center justify-center p-4 overflow-hidden">
-        {/* html5-qrcode video viewport container - spacious 3:4 aspect */}
-        <div className="relative w-full max-w-md aspect-[3/4] sm:aspect-square rounded-3xl overflow-hidden border-2 border-slate-800 bg-black shadow-2xl">
+        {/* html5-qrcode video viewport container */}
+        <div className="relative w-full max-w-md aspect-3/4 sm:aspect-square rounded-3xl overflow-hidden border-2 border-slate-800 bg-black shadow-2xl">
           <div id="mobile-qr-reader" className="w-full h-full object-cover" />
 
-          {/* Tap to Activate Camera Overlay (If not active yet or needs user gesture) */}
+          {/* Tap to Activate Camera Overlay */}
           {!cameraActive && (
             <div className="absolute inset-0 bg-slate-950/85 flex flex-col items-center justify-center p-6 text-center z-10">
               <button
                 onClick={startScanner}
                 disabled={cameraStarting}
                 type="button"
-                className="w-16 h-16 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 disabled:opacity-50 cursor-pointer mb-3"
+                className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg transition-transform active:scale-95 disabled:opacity-50 cursor-pointer mb-3 text-white ${
+                  scanMode === 'intake'
+                    ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-900/50'
+                    : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/50'
+                }`}
               >
                 {cameraStarting ? (
                   <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -427,8 +622,8 @@ function getHtml5QrcodeModule() {
               </h4>
               <p className="text-slate-400 text-xs max-w-xs leading-relaxed">
                 {permissionDenied
-                  ? 'Camera permission was blocked. Tap the 🔒 lock icon in your browser address bar → Allow Camera, then tap here to retry.'
-                  : 'Tap the button above to grant camera permission and start scanning.'}
+                  ? 'Camera permission was blocked. Tap the 🔒 lock icon in your address bar → Allow Camera, then retry.'
+                  : 'Instant camera startup. Grant permission once and scan student barcodes.'}
               </p>
 
               {permissionDenied && (
@@ -443,31 +638,108 @@ function getHtml5QrcodeModule() {
             </div>
           )}
 
-          {/* Viewfinder Overlay Reticle - Spacious Wide Guide */}
+          {/* Viewfinder Overlay Reticle */}
           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-4">
-            <div className="relative w-[92%] h-48 sm:h-44 border border-emerald-400/25 rounded-2xl">
-              <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl" />
-              <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl" />
-              <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl" />
-              <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-emerald-400 rounded-br-xl" />
+            <div
+              className={`relative w-[92%] h-48 sm:h-44 border rounded-2xl ${
+                scanMode === 'intake' ? 'border-sky-400/30' : 'border-emerald-400/30'
+              }`}
+            >
+              <div
+                className={`absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 rounded-tl-xl ${
+                  scanMode === 'intake' ? 'border-sky-400' : 'border-emerald-400'
+                }`}
+              />
+              <div
+                className={`absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 rounded-tr-xl ${
+                  scanMode === 'intake' ? 'border-sky-400' : 'border-emerald-400'
+                }`}
+              />
+              <div
+                className={`absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 rounded-bl-xl ${
+                  scanMode === 'intake' ? 'border-sky-400' : 'border-emerald-400'
+                }`}
+              />
+              <div
+                className={`absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 rounded-br-xl ${
+                  scanMode === 'intake' ? 'border-sky-400' : 'border-emerald-400'
+                }`}
+              />
 
               {/* Animated Laser Scanning Beam */}
-              {cameraActive && (status === 'scanning' || status === 'success') && (
-                <div className="absolute left-2 right-2 h-0.5 bg-rose-500 shadow-[0_0_14px_#f43f5e] animate-laser" />
+              {cameraActive && (status === 'scanning' || status === 'success' || status === 'food-list-added') && (
+                <div
+                  className={`absolute left-2 right-2 h-0.5 animate-laser ${
+                    scanMode === 'intake'
+                      ? 'bg-sky-400 shadow-[0_0_14px_#38bdf8]'
+                      : 'bg-emerald-400 shadow-[0_0_14px_#34d399]'
+                  }`}
+                />
               )}
             </div>
-            <div className="mt-3 text-[11px] uppercase tracking-wider font-semibold text-emerald-300 bg-slate-950/80 px-3 py-1 rounded-full border border-emerald-500/40 shadow-sm">
-              Whole Screen Active · Hold ID Card Anywhere
+            <div
+              className={`mt-3 text-[11px] uppercase tracking-wider font-semibold bg-slate-950/85 px-3 py-1 rounded-full border shadow-sm ${
+                scanMode === 'intake'
+                  ? 'text-sky-300 border-sky-500/40'
+                  : 'text-emerald-300 border-emerald-500/40'
+              }`}
+            >
+              Whole Viewfinder Active · Aim at Student Barcode
             </div>
           </div>
 
-          {/* DOCKED TOKEN CARD: Holds the generated token on screen until next scan while camera stays live */}
+          {/* DOCKED INTAKE CARD: Confirms student added to food list (NO TOKEN GENERATED) */}
+          {status === 'food-list-added' && resultData && (
+            <div className="absolute inset-x-0 bottom-0 p-4 bg-slate-950/95 backdrop-blur-md border-t border-sky-500/40 rounded-b-3xl text-center space-y-2.5 z-10 animate-in fade-in slide-in-from-bottom-3 duration-200">
+              <div className="flex items-center justify-between px-1">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                  Added to Daily Food List
+                </span>
+                <span className="text-[10px] text-sky-300/80 font-mono">
+                  Zero Tokens Issued ➔
+                </span>
+              </div>
+
+              <div className="bg-sky-950/60 border border-sky-500/30 rounded-2xl py-2.5 px-3">
+                <div className="text-[10px] uppercase tracking-widest text-sky-300 font-bold">STUDENT APPROVED FOR MESS</div>
+                <div className="text-xl font-black text-white my-0.5 truncate">{resultData.studentName}</div>
+                <div className="text-xs text-sky-200 font-mono">
+                  ID: <strong className="text-white">{resultData.studentId}</strong>
+                  {resultData.department ? ` · ${resultData.department}` : ''}
+                </div>
+                {resultData.project && (
+                  <div className="mt-1 text-[11px] text-slate-300 font-medium">
+                    Project: <span className="text-sky-300 font-semibold">{resultData.project}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <span className="text-[10px] text-slate-400 text-left">
+                  Student is now eligible for mess token pickup
+                </span>
+                <button
+                  onClick={() => {
+                    setStatus('scanning');
+                    setStatusMessage('Ready for next student ID barcode');
+                  }}
+                  type="button"
+                  className="px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-bold text-[11px] rounded-xl transition-colors cursor-pointer shrink-0"
+                >
+                  Next Student ↗
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* DOCKED TOKEN CARD: Holds generated meal token */}
           {status === 'success' && resultData && (
             <div className="absolute inset-x-0 bottom-0 p-4 bg-slate-950/95 backdrop-blur-md border-t border-emerald-500/40 rounded-b-3xl text-center space-y-2.5 z-10 animate-in fade-in slide-in-from-bottom-3 duration-200">
               <div className="flex items-center justify-between px-1">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Token Generated · Active
+                  Meal Token Issued
                 </span>
                 <span className="text-[10px] text-emerald-300/80 font-mono">
                   Ready for next scan ➔
@@ -501,31 +773,42 @@ function getHtml5QrcodeModule() {
             </div>
           )}
 
-          {/* Result Card Overlay (For other non-success states) */}
-          {status !== 'scanning' && status !== 'idle' && status !== 'success' && (
-            <div className={`absolute inset-0 p-6 flex flex-col items-center justify-center text-center backdrop-blur-md transition-all duration-300 ${
-              status === 'duplicate' ? 'bg-rose-950/90 text-rose-100' :
-              status === 'ineligible' ? 'bg-amber-950/90 text-amber-100' :
-              status === 'verifying' ? 'bg-slate-900/90 text-indigo-200' :
-              'bg-slate-950/90 text-slate-200'
-            }`}>
+          {/* Result Card Overlay (For other non-docked states) */}
+          {status !== 'scanning' && status !== 'idle' && status !== 'success' && status !== 'food-list-added' && (
+            <div
+              className={`absolute inset-0 p-6 flex flex-col items-center justify-center text-center backdrop-blur-md transition-all duration-300 ${
+                status === 'duplicate' || status === 'food-list-duplicate'
+                  ? 'bg-rose-950/90 text-rose-100'
+                  : status === 'ineligible'
+                  ? 'bg-amber-950/90 text-amber-100'
+                  : status === 'verifying'
+                  ? 'bg-slate-900/90 text-indigo-200'
+                  : 'bg-slate-950/90 text-slate-200'
+              }`}
+            >
               {status === 'verifying' && (
                 <div className="space-y-3">
                   <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
-                  <div className="font-bold text-base">Verifying with Database...</div>
+                  <div className="font-bold text-base">Processing with Server...</div>
                   <div className="text-xs text-indigo-300 font-mono">{lastScannedCode}</div>
                 </div>
               )}
 
-              {status === 'duplicate' && resultData && (
+              {(status === 'duplicate' || status === 'food-list-duplicate') && resultData && (
                 <div className="space-y-2">
                   <div className="w-14 h-14 bg-rose-500 text-white rounded-full flex items-center justify-center mx-auto text-2xl font-black shadow-lg">
                     !
                   </div>
-                  <div className="text-xs uppercase tracking-widest font-bold text-rose-400">DUPLICATE SCAN</div>
-                  <div className="text-lg font-bold text-white">{resultData.studentName}</div>
+                  <div className="text-xs uppercase tracking-widest font-bold text-rose-400">
+                    {status === 'food-list-duplicate' ? 'ALREADY ON FOOD LIST' : 'DUPLICATE TOKEN SCAN'}
+                  </div>
+                  <div className="text-lg font-bold text-white">{resultData.studentName || resultData.studentId}</div>
                   <div className="text-xs text-rose-200 leading-relaxed px-2">{resultData.message}</div>
-                  <div className="text-xs font-mono font-bold text-amber-300 mt-1">Existing: {resultData.tokenNumber}</div>
+                  {resultData.tokenNumber && (
+                    <div className="text-xs font-mono font-bold text-amber-300 mt-1">
+                      Existing Token: {resultData.tokenNumber}
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       setStatus('scanning');
@@ -544,7 +827,7 @@ function getHtml5QrcodeModule() {
                   <div className="w-14 h-14 bg-amber-500 text-slate-950 rounded-full flex items-center justify-center mx-auto text-2xl font-black shadow-lg">
                     ✕
                   </div>
-                  <div className="text-xs uppercase tracking-widest font-bold text-amber-400">NOT ELIGIBLE TODAY</div>
+                  <div className="text-xs uppercase tracking-widest font-bold text-amber-400">NOT ON TODAY’S FOOD LIST</div>
                   <div className="text-base font-bold text-white">{resultData.studentName || resultData.studentId}</div>
                   <div className="text-xs text-amber-200 leading-relaxed px-2">{resultData.message}</div>
                   <button
@@ -565,7 +848,9 @@ function getHtml5QrcodeModule() {
                   <div className="w-14 h-14 bg-slate-700 text-rose-400 rounded-full flex items-center justify-center mx-auto text-2xl font-black shadow-lg">
                     ?
                   </div>
-                  <div className="text-xs uppercase tracking-widest font-bold text-slate-400">SCAN FAILED</div>
+                  <div className="text-xs uppercase tracking-widest font-bold text-slate-400">
+                    {status === 'not-found' ? 'STUDENT NOT REGISTERED' : 'SCAN FAILED'}
+                  </div>
                   <div className="text-sm font-semibold text-white px-2">{statusMessage}</div>
                   <div className="text-xs font-mono text-slate-400">{lastScannedCode}</div>
                   <button
@@ -586,19 +871,24 @@ function getHtml5QrcodeModule() {
 
         {/* Status pill under viewfinder */}
         <div className="mt-4 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 flex items-center gap-2 shadow-sm max-w-sm text-center">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${
-            status === 'success' ? 'bg-emerald-500' :
-            status === 'duplicate' ? 'bg-rose-500' :
-            status === 'ineligible' ? 'bg-amber-500' :
-            'bg-indigo-500 animate-pulse'
-          }`} />
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              status === 'success' || status === 'food-list-added'
+                ? 'bg-emerald-500'
+                : status === 'duplicate' || status === 'food-list-duplicate'
+                ? 'bg-rose-500'
+                : status === 'ineligible'
+                ? 'bg-amber-500'
+                : 'bg-indigo-500 animate-pulse'
+            }`}
+          />
           <span className="truncate">{statusMessage}</span>
         </div>
 
         {/* Quick Manual Entry Fallback */}
         <div className="mt-3 w-full max-w-sm">
           <form
-            onSubmit={(e) => {
+            onSubmit={e => {
               e.preventDefault();
               if (manualInput.trim()) {
                 handleBarcodeDecoded(manualInput.trim());
@@ -617,9 +907,13 @@ function getHtml5QrcodeModule() {
             <button
               type="submit"
               disabled={!manualInput.trim()}
-              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              className={`px-3 py-2 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                scanMode === 'intake'
+                  ? 'bg-sky-600 hover:bg-sky-500'
+                  : 'bg-indigo-600 hover:bg-indigo-500'
+              }`}
             >
-              Verify
+              {scanMode === 'intake' ? '+ Add' : 'Issue'}
             </button>
           </form>
         </div>
@@ -638,12 +932,14 @@ function getHtml5QrcodeModule() {
       `}</style>
 
       {/* Bottom Instructions Footer */}
-      <footer className="p-4 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 text-center">
-        <div className="text-xs font-medium text-slate-300">
-          Point camera at Student ID Badge QR Code
+      <footer className="p-3 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 text-center">
+        <div className="text-xs font-semibold text-slate-300">
+          {scanMode === 'intake' ? '📋 Food List Mode Active' : '🎟️ Meal Token Terminal Active'}
         </div>
         <div className="text-[11px] text-slate-500 mt-0.5">
-          Scan from your laptop screen PDF or printed card
+          {scanMode === 'intake'
+            ? 'Scanning adds student to Daily Food List · Zero tokens generated'
+            : 'Scanning generates meal tokens for eligible students'}
         </div>
       </footer>
     </div>

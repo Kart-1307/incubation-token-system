@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import Badge from '@/components/Badge';
 import { getFoodTokens } from '@/actions/tokenActions';
@@ -8,36 +8,105 @@ import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListAction
 import { getStudents, getProjects, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 import { getMealSession, getTokenEffectiveSession } from '@/utils/timeUtils';
 
+interface CachedDashboardPayload {
+  date: string;
+  foodList: FoodListDetails | null;
+  tokens: any[];
+  students: StudentRecord[];
+  projects: ProjectRecord[];
+  timestamp: number;
+}
+
+let memoryDashboardCache: CachedDashboardPayload | null = null;
+
+function getInitialDashboardData(todayStr: string): CachedDashboardPayload | null {
+  if (memoryDashboardCache && memoryDashboardCache.date === todayStr) {
+    return memoryDashboardCache;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem('incubation_dashboard_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored) as CachedDashboardPayload;
+        if (parsed.date === todayStr && Date.now() - parsed.timestamp < 1000 * 60 * 30) {
+          memoryDashboardCache = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 export default function Dashboard() {
   const todayStr = new Date().toISOString().split('T')[0];
+  const initialCache = useMemo(() => getInitialDashboardData(todayStr), [todayStr]);
+
   const [searchTerm, setSearchTerm] = useState('');
-  const [todayList, setTodayList] = useState<FoodListDetails | null>(null);
-  const [tokensList, setTokensList] = useState<any[]>([]);
-  const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>([]);
-  const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [todayList, setTodayList] = useState<FoodListDetails | null>(() => initialCache?.foodList ?? null);
+  const [tokensList, setTokensList] = useState<any[]>(() => initialCache?.tokens ?? []);
+  const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
+  const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
+  const [loading, setLoading] = useState(() => !initialCache);
+
+  const loadData = useCallback(async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
+    try {
+      const [foodList, tokens, students, projects] = await Promise.all([
+        getDailyFoodList(todayStr),
+        getFoodTokens(todayStr),
+        getStudents(),
+        getProjects(),
+      ]);
+      setTodayList(foodList);
+      setTokensList(tokens);
+      setStudentRegistry(students);
+      setProjectRegistry(projects);
+
+      const payload: CachedDashboardPayload = {
+        date: todayStr,
+        foodList,
+        tokens,
+        students,
+        projects,
+        timestamp: Date.now(),
+      };
+      memoryDashboardCache = payload;
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem('incubation_dashboard_cache', JSON.stringify(payload));
+        } catch {}
+      }
+    } catch (e) {
+      console.error('Error loading dashboard:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [todayStr]);
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [foodList, tokens, students, projects] = await Promise.all([
-          getDailyFoodList(todayStr),
-          getFoodTokens(todayStr),
-          getStudents(),
-          getProjects(),
-        ]);
-        setTodayList(foodList);
-        setTokensList(tokens);
-        setStudentRegistry(students);
-        setProjectRegistry(projects);
-      } catch (e) {
-        console.error('Error loading dashboard:', e);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
-  }, [todayStr]);
+    loadData(Boolean(initialCache));
+  }, [loadData, initialCache]);
+
+  // Live SSE listener: keep dashboard synced in real time when tokens are scanned
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/terminal-stream');
+      eventSource.onmessage = e => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload.type === 'TOKEN_ISSUED' || payload.type === 'FOOD_LIST_ADDED') {
+            loadData(true);
+          }
+        } catch {}
+      };
+    } catch {}
+
+    return () => {
+      if (eventSource) eventSource.close();
+    };
+  }, [loadData]);
 
   const currentSession = getMealSession();
   const eligibleCount = todayList?.entries.length ?? 0;
@@ -90,6 +159,17 @@ export default function Dashboard() {
     });
   }, [tokensList, searchTerm, studentRegistry]);
 
+  const [activityPage, setActivityPage] = useState(1);
+  const ACTIVITY_PAGE_SIZE = 10;
+
+  useEffect(() => {
+    setActivityPage(1);
+  }, [searchTerm]);
+
+  const totalActivityPages = Math.ceil(filteredTokens.length / ACTIVITY_PAGE_SIZE) || 1;
+  const activityStartIndex = (activityPage - 1) * ACTIVITY_PAGE_SIZE;
+  const paginatedActivityTokens = filteredTokens.slice(activityStartIndex, activityStartIndex + ACTIVITY_PAGE_SIZE);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Page Header */}
@@ -140,10 +220,6 @@ export default function Dashboard() {
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-3xl font-bold text-slate-900">{eligibleCount}</span>
             <span className="text-xs text-slate-500">students approved</span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-500">List Status:</span>
-            <Badge status={todayList?.status ?? 'Draft'} />
           </div>
         </div>
 
@@ -438,6 +514,7 @@ export default function Dashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider text-[10px]">
+                    <th className="text-center py-2.5 px-3 font-semibold w-12">S.No</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Token No</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Student</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Project</th>
@@ -449,16 +526,19 @@ export default function Dashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                      <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
                         Loading today's activity...
                       </td>
                     </tr>
                   ) : filteredTokens.length > 0 ? (
-                    filteredTokens.map(token => {
+                    paginatedActivityTokens.map((token, idx) => {
                       const student = studentRegistry.find(s => s.id === token.studentId);
                       const sessionLabel = getTokenEffectiveSession(token);
                       return (
                         <tr key={token.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-3 text-center text-slate-500 font-medium font-mono text-[11px]">
+                            {activityStartIndex + idx + 1}
+                          </td>
                           <td className="py-3 pr-3 font-semibold text-indigo-700 tracking-wide font-mono tabular-nums">
                             {token.tokenNumber}
                           </td>
@@ -494,7 +574,7 @@ export default function Dashboard() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                      <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
                         No tokens found matching the filter criteria.
                       </td>
                     </tr>
@@ -503,12 +583,47 @@ export default function Dashboard() {
               </table>
             </div>
 
-            <div className="pt-3 mt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-              <span>Showing {filteredTokens.length} of {tokensList.length} total tokens</span>
-              <Link href="/food-tokens" className="text-indigo-600 hover:text-indigo-800 font-medium">
-                Manage All Food Tokens →
-              </Link>
-            </div>
+            {/* Pagination Controls */}
+            {filteredTokens.length > 0 && (
+              <div className="pt-3.5 mt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                <div>
+                  Showing <span className="font-semibold text-slate-800">{activityStartIndex + 1}</span> to{' '}
+                  <span className="font-semibold text-slate-800">{Math.min(activityStartIndex + ACTIVITY_PAGE_SIZE, filteredTokens.length)}</span> of{' '}
+                  <span className="font-semibold text-slate-800">{filteredTokens.length}</span> tokens
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    disabled={activityPage === 1}
+                    onClick={() => setActivityPage(p => Math.max(1, p - 1))}
+                    className="px-2 py-1 rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-600 transition-colors cursor-pointer text-[11px]"
+                  >
+                    ← Prev
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalActivityPages }, (_, i) => i + 1).map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setActivityPage(p)}
+                        className={`w-6 h-6 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
+                          activityPage === p
+                            ? 'bg-indigo-700 text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    disabled={activityPage === totalActivityPages}
+                    onClick={() => setActivityPage(p => Math.min(totalActivityPages, p + 1))}
+                    className="px-2 py-1 rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-600 transition-colors cursor-pointer text-[11px]"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

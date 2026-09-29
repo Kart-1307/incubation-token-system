@@ -1,15 +1,17 @@
 import { EventEmitter } from 'events';
 
 export interface TerminalEventPayload {
-  type: 'TOKEN_ISSUED' | 'DUPLICATE' | 'NOT_FOUND' | 'INELIGIBLE' | 'ERROR';
+  type: 'TOKEN_ISSUED' | 'DUPLICATE' | 'NOT_FOUND' | 'INELIGIBLE' | 'ERROR' | 'FOOD_LIST_ADDED' | 'FOOD_LIST_DUPLICATE';
   studentId: string;
   studentName?: string;
   department?: string;
+  year?: number | string;
   project?: string;
   tokenNumber?: string;
   session?: string;
   date?: string;
   time?: string;
+  mode?: 'token' | 'intake';
   message: string;
   timestamp: string;
 }
