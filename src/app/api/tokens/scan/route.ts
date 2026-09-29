@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyStudentScan, issueFoodToken } from '@/actions/tokenActions';
+import { getTodayISTDateString } from '@/utils/timeUtils';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const studentId = body.studentId || body.rollNumber || body.id;
     const action = body.action || 'verify'; // 'verify' | 'issue'
-    const date = body.date || new Date().toISOString().split('T')[0];
+    const date = body.date || getTodayISTDateString();
 
     if (!studentId) {
       return NextResponse.json(

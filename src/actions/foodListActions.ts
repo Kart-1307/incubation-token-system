@@ -4,6 +4,7 @@ import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
+import { getTodayISTDateString } from '@/utils/timeUtils';
 
 export interface FoodListEntry {
   studentId: string;
@@ -25,7 +26,7 @@ export interface FoodListDetails {
 }
 
 export async function getDailyFoodList(dateInput?: string): Promise<FoodListDetails> {
-  const date = dateInput || new Date().toISOString().split('T')[0];
+  const date = dateInput || getTodayISTDateString();
 
   return appCache.get(`foodlist_${date}`, 30, async () => {
     try {
@@ -88,7 +89,7 @@ export async function scanStudentIntoDailyFoodList(
   project?: string;
 }> {
   const studentId = (studentIdInput || '').trim().toUpperCase();
-  const date = targetDate || new Date().toISOString().split('T')[0];
+  const date = targetDate || getTodayISTDateString();
 
   if (!studentId) {
     return { success: false, message: 'Student ID cannot be empty.' };
@@ -399,7 +400,7 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
       (allTokens || []).forEach((t: any) => { if (t.date) dateSet.add(t.date); });
 
       // Always include today's date if not already present
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getTodayISTDateString();
       dateSet.add(todayStr);
 
       const logs: DatewiseLogSummary[] = Array.from(dateSet).map(date => {

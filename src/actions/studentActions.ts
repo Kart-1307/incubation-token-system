@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
+import { getTodayISTDateString, formatISTTime, getTokenEffectiveSession } from '@/utils/timeUtils';
 
 export interface StudentRecord {
   id: string;
@@ -267,7 +268,7 @@ export async function addProjectMember(
 }
 
 export async function getDashboardStats(dateInput?: string) {
-  const date = dateInput || new Date().toISOString().split('T')[0];
+  const date = dateInput || getTodayISTDateString();
   return appCache.get(`dashboard_${date}`, 30, async () => {
     try {
       // Parallelize queries across PostgreSQL network roundtrips
@@ -378,7 +379,7 @@ export interface DashboardBundleData {
 }
 
 export async function getDashboardBundle(dateInput?: string): Promise<DashboardBundleData> {
-  const date = dateInput || new Date().toISOString().split('T')[0];
+  const date = dateInput || getTodayISTDateString();
   return appCache.get(`dash_bundle_${date}`, 20, async () => {
     try {
       const [list, eligibilities, rawTokens, students, projects] = await Promise.all([
@@ -430,7 +431,7 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
 
       const tokens = rawTokens.map((t: any) => {
         const issuedDate = t.issuedAt instanceof Date ? t.issuedAt : new Date();
-        const session = t.session || 'LUNCH';
+        const session = getTokenEffectiveSession(t);
         return {
           id: t.id,
           tokenNumber: t.tokenNumber,
@@ -440,7 +441,7 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
           year: t.student?.year ? `Year ${t.student.year}` : '—',
           project: t.project?.name || t.projectCode || '—',
           date: t.date,
-          time: issuedDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          time: formatISTTime(issuedDate),
           session,
           status: t.status,
           generatedBy: t.issuedById || 'Staff',

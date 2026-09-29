@@ -6,7 +6,7 @@ import Badge from '@/components/Badge';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
-import { getMealSession, getTokenEffectiveSession } from '@/utils/timeUtils';
+import { getMealSession, getTokenEffectiveSession, getTodayISTDateString } from '@/utils/timeUtils';
 
 interface CachedDashboardPayload {
   date: string;
@@ -39,7 +39,7 @@ function getInitialDashboardData(todayStr: string): CachedDashboardPayload | nul
 }
 
 export default function Dashboard() {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getTodayISTDateString();
   const initialCache = useMemo(() => getInitialDashboardData(todayStr), [todayStr]);
 
   const [searchTerm, setSearchTerm] = useState('');

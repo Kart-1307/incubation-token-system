@@ -1,20 +1,21 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { getMealSession, formatISTTime } from '../utils/timeUtils';
 
 const prisma = new PrismaClient();
 
 async function fix() {
-  console.log('Connecting to PostgreSQL database to fix token session values...');
+  console.log('Connecting to PostgreSQL database to fix token session values based on Indian Standard Time (IST)...');
   const tokens = await prisma.foodToken.findMany();
   console.log(`Found ${tokens.length} total food token records.`);
 
   let updatedCount = 0;
   for (const t of tokens) {
-    const issuedDate = new Date(t.issuedAt);
-    const hour = issuedDate.getHours();
-    const correctSession = hour < 12 ? 'BREAKFAST' : hour < 17 ? 'LUNCH' : 'DINNER';
+    const correctSession = getMealSession(t.issuedAt);
+    const istTimeStr = formatISTTime(t.issuedAt);
 
     if (t.session !== correctSession) {
-      console.log(`Updating token ${t.tokenNumber} (issued at ${issuedDate.toLocaleTimeString()}) from '${t.session}' -> '${correctSession}'`);
+      console.log(`Updating token ${t.tokenNumber} (issued at ${istTimeStr} IST) from '${t.session}' -> '${correctSession}'`);
       await prisma.foodToken.update({
         where: { id: t.id },
         data: { session: correctSession },

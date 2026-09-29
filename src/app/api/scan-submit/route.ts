@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { issueFoodToken } from '@/actions/tokenActions';
 import { scanStudentIntoDailyFoodList } from '@/actions/foodListActions';
 import { broadcastTerminalEvent } from '@/lib/terminalEvents';
-import { getMealSession } from '@/utils/timeUtils';
+import { getMealSession, getTodayISTDateString } from '@/utils/timeUtils';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const studentId = (body.studentId || '').trim().toUpperCase();
     const mode = body.mode === 'intake' ? 'intake' : 'token';
-    const targetDate = body.date || new Date().toISOString().split('T')[0];
+    const targetDate = body.date || getTodayISTDateString();
 
     if (!studentId) {
       return NextResponse.json({ success: false, message: 'Student ID is required.' }, { status: 400 });

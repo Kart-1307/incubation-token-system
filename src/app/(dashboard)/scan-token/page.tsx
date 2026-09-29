@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import TokenPrintSlip from '@/components/TokenPrintSlip';
 import { verifyStudentScan, issueFoodToken, type VerificationResult } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
-import { getMealSession } from '@/utils/timeUtils';
+import { getMealSession, getTodayISTDateString } from '@/utils/timeUtils';
 import { getStudents, type StudentRecord } from '@/actions/studentActions';
 import QRCode from 'qrcode';
 
@@ -38,7 +38,7 @@ export default function ScanToken() {
   const [projectName, setProjectName] = useState<string>('');
   const [message, setMessage] = useState<string>('');
   const [generatedToken, setGeneratedToken] = useState<TokenDisplay | null>(null);
-  const [todayStr] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [todayStr] = useState<string>(() => getTodayISTDateString());
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
   const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
   const [liveSyncConnected, setLiveSyncConnected] = useState<boolean>(false);

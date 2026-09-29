@@ -18,6 +18,7 @@ import {
 } from '@/actions/foodListActions';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { getTodayISTDateString } from '@/utils/timeUtils';
 
 type ActiveTab = 'list' | 'tokens' | 'logs';
 
@@ -51,7 +52,7 @@ function DailyFoodListContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getTodayISTDateString();
   const initialCache = memoryFoodListCache && memoryFoodListCache.date === todayStr && Date.now() - memoryFoodListCache.timestamp < 1000 * 60 * 15 ? memoryFoodListCache : null;
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {

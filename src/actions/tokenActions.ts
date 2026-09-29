@@ -2,7 +2,7 @@
 
 import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
-import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession } from '@/utils/timeUtils';
+import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession, getTodayISTDateString, formatISTTime } from '@/utils/timeUtils';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
 import { revalidatePath } from 'next/cache';
 
@@ -64,7 +64,7 @@ export interface VerificationResult {
 
 export async function verifyStudentScan(studentIdInput: string, targetDate?: string): Promise<VerificationResult> {
   const studentId = (studentIdInput || '').trim().toUpperCase();
-  const date = targetDate || new Date().toISOString().split('T')[0];
+  const date = targetDate || getTodayISTDateString();
 
   if (!studentId) {
     return {
@@ -148,9 +148,7 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
     );
 
     if (existingToken) {
-      const timeStr = existingToken.issuedAt instanceof Date
-        ? existingToken.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-        : 'Earlier';
+      const timeStr = formatISTTime(existingToken.issuedAt);
 
       const smartMessage = getDuplicateTokenMessage(currentSession, timeStr, student.name);
 
@@ -204,7 +202,7 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
 
 export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: string): Promise<IssueTokenResult> {
   const studentId = studentIdInput.trim().toUpperCase();
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getTodayISTDateString();
 
   try {
     const validStaffId = await ensureDefaultStaffUser();
@@ -264,9 +262,7 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
       const projectName = eligibility.project?.name || eligibility.projectCode;
 
       if (existingToken) {
-        const timeStr = existingToken.issuedAt instanceof Date
-          ? existingToken.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-          : 'earlier today';
+        const timeStr = formatISTTime(existingToken.issuedAt);
 
         const smartMessage = getDuplicateTokenMessage(session, timeStr, student.name);
 
@@ -337,9 +333,7 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         // 6. Refresh cached Dashboard and Food Token views
         appCache.invalidateTags(['dashboard', 'foodtokens', 'foodlist']);
 
-        const timeFormatted = token.issuedAt instanceof Date
-          ? token.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-          : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const timeFormatted = formatISTTime(token.issuedAt);
 
         return {
           success: true,
@@ -406,7 +400,7 @@ export async function getFoodTokens(date?: string) {
           year: t.student?.year ? `Year ${t.student.year}` : '—',
           project: t.project?.name || t.projectCode || '—',
           date: t.date,
-          time: issuedDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          time: formatISTTime(issuedDate),
           session,
           status: t.status,
           generatedBy: t.issuedById || 'Staff',
