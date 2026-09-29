@@ -73,7 +73,12 @@ function DailyFoodListContent() {
   const [showPhoneModal, setShowPhoneModal] = useState(false);
 
   // Phone connection state
-  const [tunnelUrlInput, setTunnelUrlInput] = useState('https://sairam-incubation.loca.lt');
+  const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return window.location.origin;
+    }
+    return 'https://sairam-incubation.loca.lt';
+  });
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState('');
   const [liveSyncConnected, setLiveSyncConnected] = useState(false);
 
@@ -211,7 +216,7 @@ function DailyFoodListContent() {
     }
   }, [activeTab, loadLogs]);
 
-  // Load and save phone scanner URL for QR code generator
+  // Load and save phone scanner URL for QR code generator (auto-detects deployed live origin)
   useEffect(() => {
     fetch('/api/tunnel-status')
       .then(res => res.json())
@@ -219,14 +224,24 @@ function DailyFoodListContent() {
         if (data.success && data.url) {
           setTunnelUrlInput(data.url);
         } else if (typeof window !== 'undefined') {
+          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
           const saved = localStorage.getItem('last_mobile_scanner_url');
-          if (saved) setTunnelUrlInput(saved);
+          if (isDeployed) {
+            setTunnelUrlInput(window.location.origin);
+          } else if (saved && !saved.includes('sairam-incubation.loca.lt')) {
+            setTunnelUrlInput(saved);
+          }
         }
       })
       .catch(() => {
         if (typeof window !== 'undefined') {
-          const saved = localStorage.getItem('last_mobile_scanner_url');
-          if (saved) setTunnelUrlInput(saved);
+          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+          if (isDeployed) {
+            setTunnelUrlInput(window.location.origin);
+          } else {
+            const saved = localStorage.getItem('last_mobile_scanner_url');
+            if (saved) setTunnelUrlInput(saved);
+          }
         }
       });
   }, [showPhoneModal]);

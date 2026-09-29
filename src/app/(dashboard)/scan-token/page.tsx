@@ -44,7 +44,12 @@ export default function ScanToken() {
   const [liveSyncConnected, setLiveSyncConnected] = useState<boolean>(false);
   const [showPhoneQrModal, setShowPhoneQrModal] = useState<boolean>(false);
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string>('');
-  const [tunnelUrlInput, setTunnelUrlInput] = useState<string>('https://sairam-incubation.loca.lt');
+  const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return window.location.origin;
+    }
+    return 'https://sairam-incubation.loca.lt';
+  });
   const [copiedAlert, setCopiedAlert] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -56,7 +61,7 @@ export default function ScanToken() {
     generatedTokenRef.current = generatedToken;
   }, [state, generatedToken]);
 
-  // Initialize and persist mobile scanner URL
+  // Initialize and persist mobile scanner URL (auto-detects deployed live origin)
   useEffect(() => {
     fetch('/api/tunnel-status')
       .then(res => res.json())
@@ -64,14 +69,24 @@ export default function ScanToken() {
         if (data.success && data.url) {
           setTunnelUrlInput(data.url);
         } else if (typeof window !== 'undefined') {
+          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
           const saved = localStorage.getItem('last_mobile_scanner_url');
-          if (saved) setTunnelUrlInput(saved);
+          if (isDeployed) {
+            setTunnelUrlInput(window.location.origin);
+          } else if (saved && !saved.includes('sairam-incubation.loca.lt')) {
+            setTunnelUrlInput(saved);
+          }
         }
       })
       .catch(() => {
         if (typeof window !== 'undefined') {
-          const saved = localStorage.getItem('last_mobile_scanner_url');
-          if (saved) setTunnelUrlInput(saved);
+          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+          if (isDeployed) {
+            setTunnelUrlInput(window.location.origin);
+          } else {
+            const saved = localStorage.getItem('last_mobile_scanner_url');
+            if (saved) setTunnelUrlInput(saved);
+          }
         }
       });
   }, [showPhoneQrModal]);
