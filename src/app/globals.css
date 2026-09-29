@@ -58,6 +58,14 @@ nextjs-portal {
   animation: laserSweep 2s ease-in-out infinite;
 }
 
+.terminal-input {
+  color: #ffffff;
+}
+
+.terminal-input::placeholder {
+  color: #64748b;
+}
+
 @media print {
   /* Hide unrelated application elements when printing letter or thermal slip */
   body > *:not(#food-letter-printable):not(#token-slip-printable):not(.token-printable-container) {

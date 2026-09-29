@@ -31,6 +31,7 @@ const initialStudents = [
   { id: '23ME101', name: 'Rahul M', department: 'ME', year: 2, email: 'rahul@college.edu', phone: '9876543215', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
   { id: '23EC101', name: 'Kavya R', department: 'ECE', year: 2, email: 'kavya@college.edu', phone: '9876543216', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
   { id: '22CS201', name: 'Deepak N', department: 'CSE', year: 4, email: 'deepak@college.edu', phone: '9876543217', status: 'Inactive', createdAt: new Date(), updatedAt: new Date() },
+  { id: 'SEC24CS110', name: 'Karthikeyan S', department: 'CSE', year: 1, email: 'karthikeyan.s@sairam.edu.in', phone: '9876543220', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
 ];
 
 const initialProjectMembers = [
@@ -42,6 +43,7 @@ const initialProjectMembers = [
   { id: 'pm-6', studentId: '23CS105', projectCode: 'HLTH-03', role: 'Developer' },
   { id: 'pm-7', studentId: '23ME101', projectCode: 'ECO-04', role: 'Lead' },
   { id: 'pm-8', studentId: '23EC101', projectCode: 'ECO-04', role: 'Member' },
+  { id: 'pm-9', studentId: 'SEC24CS110', projectCode: 'AGRI-01', role: 'Developer' },
 ];
 
 const todayStr = new Date().toISOString().split('T')[0];
@@ -88,6 +90,7 @@ const initialEligibilities = [
   { id: 'el-7', date: '2026-09-25', studentId: '23CS101', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
   { id: 'el-8', date: '2026-09-25', studentId: '23CS102', projectCode: 'SMRT-02', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
   { id: 'el-9', date: '2026-09-25', studentId: '23CS103', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
+  { id: 'el-10', date: todayStr, studentId: 'SEC24CS110', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
 ];
 
 const dateTag = todayStr.replace(/-/g, '').slice(2);
@@ -151,7 +154,7 @@ function getRealPrisma(): PrismaClient | null {
       globalStore._prismaClient = client;
 
       // Seed default staff user asynchronously if table is empty
-      client.staffUser.findFirst().then(existing => {
+      client.staffUser.findFirst().then((existing: any) => {
         if (!existing) {
           return client.staffUser.upsert({
             where: { id: 'staff-001' },
@@ -165,7 +168,7 @@ function getRealPrisma(): PrismaClient | null {
             },
           });
         }
-      }).catch(err => {
+      }).catch((err: any) => {
         console.warn('Auto staff seed warning:', err?.message || err);
       });
     } catch (e) {

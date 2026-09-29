@@ -1,3 +1,12 @@
 {
-  "css.lint.unknownAtRules": "ignore"
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore",
+  "tailwindCSS.lint.cssConflict": "ignore",
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+  "css.customData": [
+    ".vscode/css_custom_data.json"
+  ]
 }

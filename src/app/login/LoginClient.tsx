@@ -33,8 +33,7 @@ export default function LoginClient() {
     try {
       const res = await loginStaff({ username, password });
       if (res.success) {
-        router.push('/dashboard');
-        router.refresh();
+        window.location.href = '/dashboard';
       } else {
         setSignInError(res.message || 'Invalid credentials');
         setSignInLoading(false);
@@ -143,7 +142,7 @@ export default function LoginClient() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="e.g. staff or incubation@sairam.edu.in"
-                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   required
                 />
               </div>
@@ -157,7 +156,7 @@ export default function LoginClient() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   required
                 />
               </div>
@@ -165,13 +164,23 @@ export default function LoginClient() {
               <button
                 type="submit"
                 disabled={signInLoading}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-sm rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer mt-1"
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer mt-1"
               >
                 {signInLoading ? 'Authenticating...' : 'Sign In to Portal'}
               </button>
 
               <div className="pt-2 text-center text-xs text-slate-500">
                 Default Credentials: <span className="font-mono font-medium text-slate-700">staff / Sairam@123</span>
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-slate-100 text-center">
+                <a
+                  href="/mobile-scan"
+                  className="w-full inline-flex items-center justify-center gap-2 py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  <span>📱</span>
+                  <span>Open Mobile QR Scanner (No Login Required)</span>
+                </a>
               </div>
             </form>
           ) : (
@@ -267,7 +276,7 @@ export default function LoginClient() {
               <button
                 type="submit"
                 disabled={signUpLoading}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-sm rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer mt-2"
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer mt-2"
               >
                 {signUpLoading ? 'Registering Account...' : 'Create Staff Account'}
               </button>

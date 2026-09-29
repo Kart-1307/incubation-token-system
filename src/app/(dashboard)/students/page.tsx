@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Badge from '@/components/Badge';
 import { getStudents, createStudent, getProjects, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { generateStudentIdBadgesPdf } from '@/utils/generateStudentIdPdf';
 
 const depts = ['All', 'CSE', 'ME', 'ECE', 'EEE', 'Civil'];
 const years = ['All', '1', '2', '3', '4'];
@@ -21,9 +22,42 @@ export default function Students() {
   const [showAdd, setShowAdd] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
   const [toast, setToast] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const [form, setForm] = useState({ id: '', name: '', department: 'CSE', year: '3', email: '', phone: '', status: 'Active' });
   const [formError, setFormError] = useState('');
+
+  const handleExportIdBadges = async () => {
+    const listToExport = filtered.length > 0 ? filtered : studentList;
+    if (listToExport.length === 0) {
+      showToast('No students available in database to export.');
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      const badgesData = listToExport.map(s => {
+        const matchingProject = projectList.find(p => (s.projects || []).includes(p.code));
+        return {
+          id: s.id,
+          name: s.name,
+          department: s.department,
+          year: s.year,
+          status: s.status,
+          projects: s.projects,
+          projectName: matchingProject ? `${matchingProject.code} · ${matchingProject.name}` : undefined,
+        };
+      });
+
+      const doc = await generateStudentIdBadgesPdf(badgesData);
+      doc.save(`Sairam_Student_ID_Cards_${new Date().toISOString().split('T')[0]}.pdf`);
+      showToast(`Exported ${badgesData.length} Student ID Badges to PDF!`);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to generate Student ID Badges PDF.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -191,12 +225,36 @@ export default function Students() {
           <h2 className="text-xl font-semibold text-slate-800">Student Master Registry</h2>
           <p className="text-sm text-slate-500">{studentList.length} students registered in incubation database</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
-        >
-          + Add Student
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={handleExportIdBadges}
+            disabled={exportingPdf || studentList.length === 0}
+            className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
+            title="Export scannable ID cards PDF for all registered students"
+          >
+            {exportingPdf ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Generating Badges...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Export ID Badges (PDF)</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
+          >
+            + Add Student
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

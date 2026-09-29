@@ -12,7 +12,6 @@ const navItems = [
   { to: '/projects', icon: '◈', label: 'Projects' },
   { to: '/daily-food-list', icon: '▤', label: 'Daily Food List' },
   { to: '/scan-token', icon: '⊙', label: 'Scan & Token' },
-  { to: '/food-tokens', icon: '▣', label: 'Food Tokens' },
 ];
 
 export default function DashboardLayout({

@@ -250,3 +250,77 @@ export async function finalizeFoodList(
     return { success: false, message: 'Server error while finalizing food list.' };
   }
 }
+
+export interface DatewiseLogSummary {
+  date: string;
+  status: 'Draft' | 'Finalized';
+  finalizedBy?: string | null;
+  finalizedAt?: string | null;
+  totalEligible: number;
+  totalTokensIssued: number;
+  breakfastCount: number;
+  lunchCount: number;
+  dinnerCount: number;
+  turnoutPercentage: number;
+}
+
+export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
+  return appCache.get('datewise_food_logs', 30, async () => {
+    try {
+      const [allLists, allEligibilities, allTokens] = await Promise.all([
+        prisma.dailyFoodList.findMany(),
+        prisma.dailyFoodEligibility.findMany({ select: { date: true, studentId: true } }),
+        prisma.foodToken.findMany({ select: { date: true, session: true, tokenNumber: true } }),
+      ]);
+
+      const dateSet = new Set<string>();
+      (allLists || []).forEach((l: any) => { if (l.date) dateSet.add(l.date); });
+      (allEligibilities || []).forEach((e: any) => { if (e.date) dateSet.add(e.date); });
+      (allTokens || []).forEach((t: any) => { if (t.date) dateSet.add(t.date); });
+
+      // Always include today's date if not already present
+      const todayStr = new Date().toISOString().split('T')[0];
+      dateSet.add(todayStr);
+
+      const logs: DatewiseLogSummary[] = Array.from(dateSet).map(date => {
+        const list = (allLists || []).find((l: any) => l.date === date);
+        const dayEligibilities = (allEligibilities || []).filter((e: any) => e.date === date);
+        const dayTokens = (allTokens || []).filter((t: any) => t.date === date);
+
+        const breakfastCount = dayTokens.filter((t: any) => (t.session || '').toLowerCase().includes('breakfast')).length;
+        const lunchCount = dayTokens.filter((t: any) => (t.session || '').toLowerCase().includes('lunch')).length;
+        const dinnerCount = dayTokens.filter((t: any) => (t.session || '').toLowerCase().includes('dinner')).length;
+
+        const totalEligible = dayEligibilities.length;
+        const totalTokensIssued = dayTokens.length;
+
+        let turnoutPercentage = 0;
+        if (totalEligible > 0) {
+          turnoutPercentage = Math.min(100, Math.round((totalTokensIssued / totalEligible) * 100));
+        } else if (totalTokensIssued > 0) {
+          turnoutPercentage = 100;
+        }
+
+        return {
+          date,
+          status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+          finalizedBy: list?.finalizedBy || null,
+          finalizedAt: list?.finalizedAt ? new Date(list.finalizedAt).toLocaleString('en-IN') : null,
+          totalEligible,
+          totalTokensIssued,
+          breakfastCount,
+          lunchCount,
+          dinnerCount,
+          turnoutPercentage,
+        };
+      });
+
+      // Sort descending by date
+      return logs.sort((a, b) => b.date.localeCompare(a.date));
+    } catch (error) {
+      console.error('Error fetching datewise food logs:', error);
+      return [];
+    }
+  }, ['foodlist', 'foodtokens']);
+}
+

@@ -80,7 +80,7 @@ export async function loginStaff(formData: { username?: string; password?: strin
 
     cookieStore.set(SESSION_COOKIE_NAME, sessionData, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: false,
       sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24 * 7, // 7 days

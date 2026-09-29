@@ -8,6 +8,24 @@ import { revalidatePath } from 'next/cache';
 export interface IssueTokenResult {
   success: boolean;
   message: string;
+  notFound?: boolean;
+  isEligible?: boolean;
+  isDuplicate?: boolean;
+  existingToken?: {
+    id: string;
+    tokenNumber: string;
+    time: string;
+    date: string;
+    session?: string;
+  };
+  student?: {
+    id: string;
+    name: string;
+    department: string;
+    year: number;
+    status: string;
+  };
+  project?: string;
   token?: {
     id: string;
     tokenNumber: string;
@@ -196,7 +214,7 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         where: { id: studentId },
       });
       if (!student) {
-        return { success: false, message: `Student ID "${studentId}" not found in registry.` };
+        return { success: false, notFound: true, message: `Student ID "${studentId}" not found in institutional registry.` };
       }
 
       // 2. Verify Eligibility in Today's Food List
@@ -213,6 +231,14 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
       if (!eligibility) {
         return {
           success: false,
+          isEligible: false,
+          student: {
+            id: student.id,
+            name: student.name,
+            department: student.department,
+            year: student.year,
+            status: student.status,
+          },
           message: `Student "${student.name}" (${student.id}) is NOT approved for today's food list (${todayStr}).`,
         };
       }
@@ -234,6 +260,8 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
           getTokenEffectiveSession(t) === session
       );
 
+      const projectName = eligibility.project?.name || eligibility.projectCode;
+
       if (existingToken) {
         const timeStr = existingToken.issuedAt instanceof Date
           ? existingToken.issuedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
@@ -243,22 +271,50 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
 
         return {
           success: false,
+          isDuplicate: true,
+          existingToken: {
+            id: existingToken.id,
+            tokenNumber: existingToken.tokenNumber,
+            time: timeStr,
+            date: existingToken.date,
+            session,
+          },
+          student: {
+            id: student.id,
+            name: student.name,
+            department: student.department,
+            year: student.year,
+            status: student.status,
+          },
+          project: projectName,
           message: smartMessage,
         };
       }
 
-      // 4. Generate Consecutive Daily Token Sequence (Collision-free)
-      const existingTokensToday = await tx.foodToken.findMany({
-        where: { date: todayStr },
+      // 4. Generate Consecutive Daily Token Sequence (Find highest sequence number to avoid collisions)
+      const dateTag = todayStr.replace(/-/g, '').slice(2);
+      const existingTodayTokens = await tx.foodToken.findMany({
+        where: {
+          date: todayStr,
+          tokenNumber: { startsWith: `INC-${dateTag}-` },
+        },
         select: { tokenNumber: true },
       });
-      const dateTag = todayStr.replace(/-/g, '').slice(2);
 
-      const usedNumbers = new Set((existingTokensToday || []).map((t: any) => t.tokenNumber));
-      let nextSeqNum = (existingTokensToday || []).length + 1;
+      let maxSeq = 0;
+      for (const t of (existingTodayTokens || [])) {
+        const parts = (t.tokenNumber || '').split('-');
+        const num = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(num) && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+
+      let nextSeqNum = Math.max(maxSeq + 1, 1);
       let tokenNumber = `INC-${dateTag}-${String(nextSeqNum).padStart(3, '0')}`;
 
-      while (usedNumbers.has(tokenNumber)) {
+      // Additional guarantee: ensure unique token number
+      while (await tx.foodToken.findUnique({ where: { tokenNumber } })) {
         nextSeqNum++;
         tokenNumber = `INC-${dateTag}-${String(nextSeqNum).padStart(3, '0')}`;
       }
@@ -287,12 +343,20 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         return {
           success: true,
           message: `Token ${token.tokenNumber} generated successfully for ${student.name} (${session}).`,
+          student: {
+            id: student.id,
+            name: student.name,
+            department: student.department,
+            year: student.year,
+            status: student.status,
+          },
+          project: projectName,
           token: {
             id: token.id,
             tokenNumber: token.tokenNumber,
             studentId: student.id,
             studentName: student.name,
-            project: eligibility.project?.name || eligibility.projectCode,
+            project: projectName,
             date: todayStr,
             time: timeFormatted,
             session,
