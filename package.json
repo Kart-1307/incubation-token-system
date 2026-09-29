@@ -8,7 +8,8 @@
     "tunnel": "node scripts/tunnel.js",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
