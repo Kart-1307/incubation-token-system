@@ -369,3 +369,177 @@ export async function deleteProject(projectCodeInput: string): Promise<{ success
     return { success: false, message: 'Server error while deleting project.' };
   }
 }
+
+export interface DashboardBundleData {
+  foodList: any;
+  tokens: any[];
+  students: StudentRecord[];
+  projects: ProjectRecord[];
+}
+
+export async function getDashboardBundle(dateInput?: string): Promise<DashboardBundleData> {
+  const date = dateInput || new Date().toISOString().split('T')[0];
+  return appCache.get(`dash_bundle_${date}`, 20, async () => {
+    try {
+      const [list, eligibilities, rawTokens, students, projects] = await Promise.all([
+        prisma.dailyFoodList.findUnique({
+          where: { date },
+          include: { entries: true },
+        }),
+        prisma.dailyFoodEligibility.findMany({
+          where: { date },
+          include: { student: true, project: true },
+        }),
+        prisma.foodToken.findMany({
+          where: { date },
+          include: { student: true, project: true },
+          orderBy: { issuedAt: 'desc' },
+        }),
+        prisma.student.findMany({
+          include: { projectMemberships: true },
+        }),
+        prisma.project.findMany({
+          include: {
+            members: {
+              include: { student: true },
+            },
+          },
+        }),
+      ]);
+
+      const entries = eligibilities.map((e: any) => ({
+        studentId: e.studentId,
+        studentName: e.student?.name || e.studentId,
+        department: normalizeDepartmentName(e.student?.department),
+        year: e.student?.year || 0,
+        projectCode: e.projectCode,
+        projectName: e.project?.name || e.projectCode,
+        addedBy: e.addedBy || 'Staff',
+        status: e.status || 'Eligible',
+      }));
+
+      const foodList = {
+        date,
+        status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+        finalizedBy: list?.finalizedBy || null,
+        finalizedAt: list?.finalizedAt instanceof Date
+          ? list.finalizedAt.toLocaleString('en-IN')
+          : (list?.finalizedAt ? String(list.finalizedAt) : null),
+        entries,
+      };
+
+      const tokens = rawTokens.map((t: any) => {
+        const issuedDate = t.issuedAt instanceof Date ? t.issuedAt : new Date();
+        const session = t.session || 'LUNCH';
+        return {
+          id: t.id,
+          tokenNumber: t.tokenNumber,
+          studentId: t.studentId,
+          studentName: t.student?.name || t.studentId,
+          department: normalizeDepartmentName(t.student?.department),
+          year: t.student?.year ? `Year ${t.student.year}` : '—',
+          project: t.project?.name || t.projectCode || '—',
+          date: t.date,
+          time: issuedDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          session,
+          status: t.status,
+          generatedBy: t.issuedById || 'Staff',
+        };
+      });
+
+      const formattedStudents: StudentRecord[] = students.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        department: normalizeDepartmentName(s.department),
+        year: s.year,
+        email: s.email,
+        phone: s.phone,
+        status: s.status,
+        projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
+      }));
+
+      const formattedProjects: ProjectRecord[] = projects.map((p: any) => ({
+        code: p.code,
+        name: p.name,
+        description: p.description,
+        status: p.status,
+        createdDate: p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+        members: (p.members || []).map((m: any) => ({
+          studentId: m.studentId,
+          role: m.role,
+          studentName: m.student?.name,
+          department: m.student?.department ? normalizeDepartmentName(m.student.department) : undefined,
+          year: m.student?.year,
+        })),
+      }));
+
+      return {
+        foodList,
+        tokens,
+        students: formattedStudents,
+        projects: formattedProjects,
+      };
+    } catch (err) {
+      console.error('getDashboardBundle error:', err);
+      return {
+        foodList: { date, status: 'Draft', entries: [] },
+        tokens: [],
+        students: [],
+        projects: [],
+      };
+    }
+  }, ['dashboard', 'foodlist', 'foodtokens', 'students', 'projects']);
+}
+
+export async function getStudentsBundle(): Promise<{ students: StudentRecord[]; projects: ProjectRecord[] }> {
+  return appCache.get('students_bundle', 20, async () => {
+    try {
+      const [students, projects] = await Promise.all([
+        prisma.student.findMany({
+          include: { projectMemberships: true },
+        }),
+        prisma.project.findMany({
+          include: {
+            members: {
+              include: { student: true },
+            },
+          },
+        }),
+      ]);
+
+      const formattedStudents: StudentRecord[] = students.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        department: normalizeDepartmentName(s.department),
+        year: s.year,
+        email: s.email,
+        phone: s.phone,
+        status: s.status,
+        projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
+      }));
+
+      const formattedProjects: ProjectRecord[] = projects.map((p: any) => ({
+        code: p.code,
+        name: p.name,
+        description: p.description,
+        status: p.status,
+        createdDate: p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+        members: (p.members || []).map((m: any) => ({
+          studentId: m.studentId,
+          role: m.role,
+          studentName: m.student?.name,
+          department: m.student?.department ? normalizeDepartmentName(m.student.department) : undefined,
+          year: m.student?.year,
+        })),
+      }));
+
+      return {
+        students: formattedStudents,
+        projects: formattedProjects,
+      };
+    } catch (err) {
+      console.error('getStudentsBundle error:', err);
+      return { students: [], projects: [] };
+    }
+  }, ['students', 'projects']);
+}

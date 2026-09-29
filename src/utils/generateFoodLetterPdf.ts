@@ -1,9 +1,27 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-interface StudentInfo {
+export interface StudentInfo {
   studentId: string;
   name: string;
+}
+
+export interface EditableLetterContent {
+  date?: string;
+  fromName?: string;
+  fromRollNo?: string;
+  fromCollege?: string;
+  fromLocation?: string;
+  recipientTitle?: string;
+  recipientCollege?: string;
+  recipientLocation?: string;
+  subject?: string;
+  salutation?: string;
+  bodyText?: string;
+  signOffText?: string;
+  page2Title?: string;
+  page2Subtitle?: string;
+  studentsList?: StudentInfo[];
 }
 
 export function generateFoodRequestLetterPdf(
@@ -11,7 +29,8 @@ export function generateFoodRequestLetterPdf(
   representativeRollNo: string,
   projectsText: string,
   foodDate: string,
-  studentsList: StudentInfo[]
+  studentsList: StudentInfo[],
+  customLetter?: EditableLetterContent
 ) {
   // Format date as DD/MM/YY if YYYY-MM-DD
   let formattedDate = foodDate;
@@ -19,6 +38,26 @@ export function generateFoodRequestLetterPdf(
     const [y, m, d] = foodDate.split('-');
     formattedDate = `${d}/${m}/${y.slice(2)}`;
   }
+
+  const finalDate = customLetter?.date?.trim() || formattedDate;
+  const finalFromName = customLetter?.fromName?.trim() || representativeName?.trim() || '____________________';
+  const finalFromRollNo = customLetter?.fromRollNo?.trim() || representativeRollNo?.trim() || '';
+  const finalFromCollege = customLetter?.fromCollege?.trim() || 'Sri Sai Ram Engineering College';
+  const finalFromLocation = customLetter?.fromLocation?.trim() || 'Chennai – 44';
+  const finalRecipientTitle = customLetter?.recipientTitle?.trim() || 'The Principal';
+  const finalRecipientCollege = customLetter?.recipientCollege?.trim() || 'Sri Sai Ram Engineering College';
+  const finalRecipientLocation = customLetter?.recipientLocation?.trim() || 'Chennai – 44';
+  const finalSubject = customLetter?.subject?.trim() || `sub: Request for Night stay in Incubation on ${finalDate}`;
+  const finalSalutation = customLetter?.salutation?.trim() || 'Respected Sir,';
+  const projectsList = projectsText || '__________________________________';
+  const defaultBody = `Our Incubation teams has involved in ${projectsList}. So, I request you to give permission for night stay on ${finalDate}. I also request you to provide food tokens. The student's list is attached with this letter.`;
+  const finalBodyText = customLetter?.bodyText?.trim() || defaultBody;
+  const finalSignOff = customLetter?.signOffText?.trim() || 'Yours Truly,';
+  const finalPage2Title = customLetter?.page2Title?.trim() || 'List of Students Requiring Food Arrangement';
+  const finalStudents = customLetter?.studentsList && customLetter.studentsList.length > 0
+    ? customLetter.studentsList
+    : studentsList;
+  const finalPage2Subtitle = customLetter?.page2Subtitle?.trim() || `Food Date: ${finalDate}   |   Total Students: ${finalStudents.length}`;
 
   // A4 dimensions: 210 x 297 mm
   const doc = new jsPDF({
@@ -38,7 +77,7 @@ export function generateFoodRequestLetterPdf(
   cursorY += 5;
   doc.setFont('times', 'normal');
   doc.setFontSize(11);
-  doc.text(`DATE: ${formattedDate}`, 210 - marginX, cursorY, { align: 'right' });
+  doc.text(`DATE: ${finalDate}`, 210 - marginX, cursorY, { align: 'right' });
 
   // FROM Section
   cursorY += 8;
@@ -47,14 +86,17 @@ export function generateFoodRequestLetterPdf(
 
   cursorY += 6;
   doc.setFont('times', 'bold');
-  doc.text(representativeName || '____________________', marginX, cursorY);
+  doc.text(finalFromName, marginX, cursorY);
+  if (finalFromRollNo) {
+    cursorY += 5;
+    doc.setFont('times', 'normal');
+    doc.text(finalFromRollNo, marginX, cursorY);
+  }
   cursorY += 5;
   doc.setFont('times', 'normal');
-  doc.text(representativeRollNo || (representativeName ? '' : '____________________'), marginX, cursorY);
+  doc.text(finalFromCollege, marginX, cursorY);
   cursorY += 5;
-  doc.text('Sri Sai Ram Engineering College', marginX, cursorY);
-  cursorY += 5;
-  doc.text('Chennai – 44', marginX, cursorY);
+  doc.text(finalFromLocation, marginX, cursorY);
 
   // TO Section
   cursorY += 10;
@@ -62,29 +104,25 @@ export function generateFoodRequestLetterPdf(
   doc.text('TO,', marginX, cursorY);
 
   cursorY += 6;
-  doc.text('The Principal', marginX, cursorY);
+  doc.text(finalRecipientTitle, marginX, cursorY);
   cursorY += 5;
-  doc.text('Sri Sai Ram Engineering College', marginX, cursorY);
+  doc.text(finalRecipientCollege, marginX, cursorY);
   cursorY += 5;
-  doc.text('Chennai – 44', marginX, cursorY);
+  doc.text(finalRecipientLocation, marginX, cursorY);
 
   // SUBJECT
   cursorY += 12;
   doc.setFont('times', 'normal');
-  const subjectLine = `sub: Request for Night stay in Incubation on ${formattedDate}`;
-  doc.text(subjectLine, marginX, cursorY);
+  doc.text(finalSubject, marginX, cursorY);
 
   // SALUTATION
   cursorY += 12;
   doc.setFont('times', 'normal');
-  doc.text('Respected Sir,', marginX, cursorY);
+  doc.text(finalSalutation, marginX, cursorY);
 
   // BODY
   cursorY += 7;
-  const projectsList = projectsText || '__________________________________';
-  const bodyText = `Our Incubation teams has involved in ${projectsList}. So, I request you to give permission for night stay on ${formattedDate}. I also request you to provide food tokens. The student's list is attached with this letter.`;
-  
-  doc.text(bodyText, marginX, cursorY, {
+  doc.text(finalBodyText, marginX, cursorY, {
     maxWidth: 210 - marginX * 2,
     lineHeightFactor: 1.5,
   });
@@ -95,16 +133,16 @@ export function generateFoodRequestLetterPdf(
 
   doc.setFont('times', 'normal');
   doc.setFontSize(11);
-  doc.text('Yours Truly,', rightX, cursorY, { align: 'right' });
+  doc.text(finalSignOff, rightX, cursorY, { align: 'right' });
 
   cursorY += 22; // Space for physical signature
   doc.setFont('times', 'bold');
-  doc.text(representativeName || '____________________', rightX, cursorY, { align: 'right' });
+  doc.text(finalFromName, rightX, cursorY, { align: 'right' });
   
-  if (representativeRollNo) {
+  if (finalFromRollNo) {
     cursorY += 5;
     doc.setFont('times', 'normal');
-    doc.text(representativeRollNo, rightX, cursorY, { align: 'right' });
+    doc.text(finalFromRollNo, rightX, cursorY, { align: 'right' });
   }
 
   // Footer for Page 1
@@ -124,19 +162,19 @@ export function generateFoodRequestLetterPdf(
   // Title: List of Students
   doc.setFont('times', 'bold');
   doc.setFontSize(13);
-  doc.text('List of Students Requiring Food Arrangement', 105, p2CursorY, { align: 'center' });
+  doc.text(finalPage2Title, 105, p2CursorY, { align: 'center' });
 
   p2CursorY += 6;
   doc.setFont('times', 'normal');
   doc.setFontSize(10);
-  doc.text(`Food Date: ${formattedDate}   |   Total Students: ${studentsList.length}`, 105, p2CursorY, {
+  doc.text(finalPage2Subtitle, 105, p2CursorY, {
     align: 'center',
   });
 
   p2CursorY += 8;
 
   // Table Data: exactly 3 columns
-  const tableData = studentsList.map((st, index) => [
+  const tableData = finalStudents.map((st, index) => [
     String(index + 1),
     st.name,
     st.studentId,

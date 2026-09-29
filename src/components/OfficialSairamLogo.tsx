@@ -3,7 +3,7 @@
 export default function OfficialSairamLogo({ className = '' }: { className?: string }) {
   return (
     <div className={`flex flex-col items-center justify-center text-center select-none ${className}`}>
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-center max-w-[280px]">
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-center max-w-70">
         {/* Official Sairam Institutions Logo (Sai Baba Portrait + Sairam + INSTITUTIONS Banner) */}
         <img
           src="/sairam-engineering-college-logo.png"

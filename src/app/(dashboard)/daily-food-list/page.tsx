@@ -17,9 +17,20 @@ import {
   type DatewiseLogSummary,
 } from '@/actions/foodListActions';
 import { getFoodTokens } from '@/actions/tokenActions';
-import { getStudents, getProjects, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 
 type ActiveTab = 'list' | 'tokens' | 'logs';
+
+interface CachedDailyFoodListPayload {
+  date: string;
+  list: FoodListDetails;
+  students: StudentRecord[];
+  projects: ProjectRecord[];
+  tokens: any[];
+  timestamp: number;
+}
+
+let memoryFoodListCache: CachedDailyFoodListPayload | null = null;
 
 export default function DailyFoodListPage() {
   return (
@@ -41,6 +52,8 @@ function DailyFoodListContent() {
   const router = useRouter();
 
   const todayStr = new Date().toISOString().split('T')[0];
+  const initialCache = memoryFoodListCache && memoryFoodListCache.date === todayStr && Date.now() - memoryFoodListCache.timestamp < 1000 * 60 * 15 ? memoryFoodListCache : null;
+
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const tabParam = searchParams.get('tab');
     if (tabParam === 'tokens') return 'tokens';
@@ -49,13 +62,13 @@ function DailyFoodListContent() {
   });
 
   const [selectedDate, setSelectedDate] = useState(todayStr);
-  const [currentList, setCurrentList] = useState<FoodListDetails | null>(null);
-  const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>([]);
-  const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [currentList, setCurrentList] = useState<FoodListDetails | null>(() => initialCache?.list ?? null);
+  const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
+  const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
+  const [loading, setLoading] = useState(() => !initialCache);
 
   // Tokens state
-  const [tokens, setTokens] = useState<any[]>([]);
+  const [tokens, setTokens] = useState<any[]>(() => initialCache?.tokens ?? []);
   const [tokensLoading, setTokensLoading] = useState(false);
   const [tokenSearch, setTokenSearch] = useState('');
   const [tokenDateFilter, setTokenDateFilter] = useState(todayStr);
@@ -152,20 +165,25 @@ function DailyFoodListContent() {
     router.replace(query ? `?${query}` : window.location.pathname, { scroll: false });
   };
 
-  // Load Daily Food List and Tokens data in parallel
-  const loadData = useCallback(async (date: string) => {
-    setLoading(true);
+  // Load Daily Food List and Tokens data in a single fast bundle
+  const loadData = useCallback(async (date: string, isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
-      const [listData, studentsData, projectsData, tokensData] = await Promise.all([
-        getDailyFoodList(date),
-        getStudents(),
-        getProjects(),
-        getFoodTokens(date),
-      ]);
-      setCurrentList(listData);
-      setStudentRegistry(studentsData);
-      setProjectRegistry(projectsData);
-      setTokens(tokensData);
+      const bundle = await getDashboardBundle(date);
+      setCurrentList(bundle.foodList);
+      setStudentRegistry(bundle.students);
+      setProjectRegistry(bundle.projects);
+      setTokens(bundle.tokens);
+
+      const payload: CachedDailyFoodListPayload = {
+        date,
+        list: bundle.foodList,
+        students: bundle.students,
+        projects: bundle.projects,
+        tokens: bundle.tokens,
+        timestamp: Date.now(),
+      };
+      memoryFoodListCache = payload;
     } catch (e) {
       console.error(e);
       showToast('Failed to load food list data from server.');
@@ -200,9 +218,13 @@ function DailyFoodListContent() {
     }
   }, []);
 
+  const initialLoadRef = useRef(false);
+
   useEffect(() => {
-    loadData(selectedDate);
-  }, [selectedDate, loadData]);
+    const isInitial = !initialLoadRef.current;
+    initialLoadRef.current = true;
+    loadData(selectedDate, isInitial && selectedDate === todayStr);
+  }, [selectedDate, loadData, todayStr]);
 
   useEffect(() => {
     if (activeTab === 'tokens') {

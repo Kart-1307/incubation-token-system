@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import Badge from '@/components/Badge';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
-import { getStudents, getProjects, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 import { getMealSession, getTokenEffectiveSession } from '@/utils/timeUtils';
 
 interface CachedDashboardPayload {
@@ -52,23 +52,18 @@ export default function Dashboard() {
   const loadData = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const [foodList, tokens, students, projects] = await Promise.all([
-        getDailyFoodList(todayStr),
-        getFoodTokens(todayStr),
-        getStudents(),
-        getProjects(),
-      ]);
-      setTodayList(foodList);
-      setTokensList(tokens);
-      setStudentRegistry(students);
-      setProjectRegistry(projects);
+      const bundle = await getDashboardBundle(todayStr);
+      setTodayList(bundle.foodList);
+      setTokensList(bundle.tokens);
+      setStudentRegistry(bundle.students);
+      setProjectRegistry(bundle.projects);
 
       const payload: CachedDashboardPayload = {
         date: todayStr,
-        foodList,
-        tokens,
-        students,
-        projects,
+        foodList: bundle.foodList,
+        tokens: bundle.tokens,
+        students: bundle.students,
+        projects: bundle.projects,
         timestamp: Date.now(),
       };
       memoryDashboardCache = payload;
@@ -84,8 +79,13 @@ export default function Dashboard() {
     }
   }, [todayStr]);
 
+  const initialLoadRef = useRef(false);
+
   useEffect(() => {
-    loadData(Boolean(initialCache));
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      loadData(Boolean(initialCache));
+    }
   }, [loadData, initialCache]);
 
   // Live SSE listener: keep dashboard synced in real time when tokens are scanned

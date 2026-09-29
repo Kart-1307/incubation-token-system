@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Badge from '@/components/Badge';
-import { getStudents, createStudent, getProjects, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { getStudentsBundle, createStudent, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 
 const UNDERGRAD_DEPARTMENTS = [
   'Civil Engineering',
@@ -31,10 +31,39 @@ const years = ['All', '1', '2', '3', '4'];
 
 type View = 'list' | 'detail';
 
+interface CachedStudentsPayload {
+  students: StudentRecord[];
+  projects: ProjectRecord[];
+  timestamp: number;
+}
+
+let memoryStudentsCache: CachedStudentsPayload | null = null;
+
+function getInitialStudentsData(): CachedStudentsPayload | null {
+  if (memoryStudentsCache && Date.now() - memoryStudentsCache.timestamp < 1000 * 60 * 15) {
+    return memoryStudentsCache;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem('incubation_students_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored) as CachedStudentsPayload;
+        if (Date.now() - parsed.timestamp < 1000 * 60 * 15) {
+          memoryStudentsCache = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 export default function Students() {
-  const [studentList, setStudentList] = useState<StudentRecord[]>([]);
-  const [projectList, setProjectList] = useState<ProjectRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCache = useMemo(() => getInitialStudentsData(), []);
+
+  const [studentList, setStudentList] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
+  const [projectList, setProjectList] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('All');
   const [yearFilter, setYearFilter] = useState('All');
@@ -60,15 +89,24 @@ export default function Students() {
     setTimeout(() => setToast(''), 3000);
   };
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
-      const [students, projects] = await Promise.all([
-        getStudents(),
-        getProjects(),
-      ]);
-      setStudentList(students);
-      setProjectList(projects);
+      const bundle = await getStudentsBundle();
+      setStudentList(bundle.students);
+      setProjectList(bundle.projects);
+
+      const payload: CachedStudentsPayload = {
+        students: bundle.students,
+        projects: bundle.projects,
+        timestamp: Date.now(),
+      };
+      memoryStudentsCache = payload;
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem('incubation_students_cache', JSON.stringify(payload));
+        } catch {}
+      }
     } catch (e) {
       console.error(e);
       showToast('Error loading student records.');
@@ -77,9 +115,14 @@ export default function Students() {
     }
   }, []);
 
+  const initialLoadRef = useRef(false);
+
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      loadData(Boolean(initialCache));
+    }
+  }, [loadData, initialCache]);
 
   const filtered = studentList.filter(s => {
     const q = search.toLowerCase();

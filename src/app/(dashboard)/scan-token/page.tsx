@@ -462,26 +462,120 @@ export default function ScanToken() {
             <span className="text-slate-400 font-mono">SESSION: {currentMealSession}</span>
           </div>
 
-          {/* Viewfinder Target Frame with Animated Red Laser */}
-          <div className="relative w-full h-56 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col items-center justify-center p-4">
+          {/* Viewfinder Target Frame with Authentic 1D Barcode Card & Animated Laser */}
+          <div className="relative w-full py-6 px-4 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col items-center justify-center select-none">
+            {/* Ambient Background Grid Pattern */}
+            <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] bg-size-[16px_16px] opacity-25 pointer-events-none" />
+
             {/* Viewfinder Corner Reticles */}
-            <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-amber-400 rounded-tl" />
-            <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-amber-400 rounded-tr" />
-            <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-amber-400 rounded-bl" />
-            <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-amber-400 rounded-br" />
+            <div className="absolute top-3 left-3 w-5 h-5 border-t-2 border-l-2 border-amber-400/90 rounded-tl" />
+            <div className="absolute top-3 right-3 w-5 h-5 border-t-2 border-r-2 border-amber-400/90 rounded-tr" />
+            <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-amber-400/90 rounded-bl" />
+            <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-amber-400/90 rounded-br" />
 
-            {/* Animated Laser Beam */}
-            <div className="absolute left-4 right-4 h-0.5 bg-rose-500 shadow-[0_0_12px_#f43f5e] animate-laser" />
+            {/* Stylized Student ID Barcode Card */}
+            <div className="relative z-10 w-full max-w-sm bg-linear-to-b from-slate-900 via-slate-900 to-slate-950 border border-slate-700/80 rounded-xl p-3.5 shadow-2xl overflow-hidden">
+              {/* Animated Laser Sweep Beam across the ID Card */}
+              <div className="absolute left-0 right-0 h-0.5 bg-rose-500 shadow-[0_0_12px_#f43f5e,0_0_24px_#f43f5e] animate-laser z-20 pointer-events-none">
+                <div className="absolute inset-0 bg-white/80 blur-[0.5px]" />
+                <div className="absolute -top-2.5 -bottom-2.5 left-0 right-0 bg-rose-500/20 blur-xs" />
+              </div>
 
-            {/* Center Barcode Scanner Icon */}
-            <div className="text-slate-700 mb-2">
-              <svg className="w-16 h-16 stroke-current stroke-[1.2] fill-none" viewBox="0 0 24 24">
-                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
-                <rect x="7" y="7" width="10" height="10" rx="1" strokeWidth="1.5" />
-              </svg>
+              {/* ID Badge Header */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-[10px] tracking-wider text-slate-400">
+                <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_6px_#fbbf24]" />
+                  <span>SRI SAIRAM ENGINEERING COLLEGE</span>
+                </div>
+                <span className="font-mono text-indigo-400 font-semibold">SMART ID</span>
+              </div>
+
+              {/* White Barcode Plate */}
+              <div className="my-2.5 bg-white rounded-lg p-2.5 shadow-inner flex flex-col items-center justify-center">
+                {/* 1D Barcode SVG Graphic */}
+                <svg className="w-full h-11 text-slate-900" viewBox="0 0 280 44" fill="currentColor">
+                  {/* Left Guard */}
+                  <rect x="0" y="0" width="3" height="44" />
+                  <rect x="5" y="0" width="2" height="44" />
+                  {/* Left Data Bars */}
+                  <rect x="10" y="0" width="4" height="40" />
+                  <rect x="16" y="0" width="1" height="40" />
+                  <rect x="19" y="0" width="3" height="40" />
+                  <rect x="25" y="0" width="6" height="40" />
+                  <rect x="33" y="0" width="2" height="40" />
+                  <rect x="38" y="0" width="4" height="40" />
+                  <rect x="44" y="0" width="1" height="40" />
+                  <rect x="47" y="0" width="5" height="40" />
+                  <rect x="54" y="0" width="2" height="40" />
+                  <rect x="58" y="0" width="3" height="40" />
+                  <rect x="64" y="0" width="1" height="40" />
+                  <rect x="67" y="0" width="6" height="40" />
+                  <rect x="75" y="0" width="2" height="40" />
+                  <rect x="80" y="0" width="4" height="40" />
+                  <rect x="86" y="0" width="3" height="40" />
+                  <rect x="91" y="0" width="1" height="40" />
+                  <rect x="94" y="0" width="5" height="40" />
+                  <rect x="101" y="0" width="2" height="40" />
+                  <rect x="105" y="0" width="4" height="40" />
+                  <rect x="111" y="0" width="1" height="40" />
+                  <rect x="114" y="0" width="6" height="40" />
+                  <rect x="122" y="0" width="3" height="40" />
+                  <rect x="127" y="0" width="2" height="40" />
+                  <rect x="131" y="0" width="5" height="40" />
+                  <rect x="138" y="0" width="1" height="40" />
+                  {/* Center Guard */}
+                  <rect x="142" y="0" width="2" height="44" />
+                  <rect x="146" y="0" width="2" height="44" />
+                  {/* Right Data Bars */}
+                  <rect x="151" y="0" width="4" height="40" />
+                  <rect x="157" y="0" width="2" height="40" />
+                  <rect x="161" y="0" width="5" height="40" />
+                  <rect x="168" y="0" width="1" height="40" />
+                  <rect x="171" y="0" width="3" height="40" />
+                  <rect x="176" y="0" width="6" height="40" />
+                  <rect x="184" y="0" width="2" height="40" />
+                  <rect x="188" y="0" width="4" height="40" />
+                  <rect x="194" y="0" width="1" height="40" />
+                  <rect x="197" y="0" width="5" height="40" />
+                  <rect x="204" y="0" width="3" height="40" />
+                  <rect x="209" y="0" width="2" height="40" />
+                  <rect x="213" y="0" width="6" height="40" />
+                  <rect x="221" y="0" width="1" height="40" />
+                  <rect x="224" y="0" width="4" height="40" />
+                  <rect x="230" y="0" width="3" height="40" />
+                  <rect x="235" y="0" width="5" height="40" />
+                  <rect x="242" y="0" width="2" height="40" />
+                  <rect x="246" y="0" width="4" height="40" />
+                  <rect x="252" y="0" width="1" height="40" />
+                  <rect x="255" y="0" width="6" height="40" />
+                  <rect x="263" y="0" width="2" height="40" />
+                  <rect x="267" y="0" width="4" height="40" />
+                  {/* Right Guard */}
+                  <rect x="274" y="0" width="2" height="44" />
+                  <rect x="278" y="0" width="2" height="44" />
+                </svg>
+                <div className="text-[10px] font-mono tracking-[0.3em] text-slate-800 font-bold mt-1 text-center select-none">
+                  * SEC-STUDENT-ID *
+                </div>
+              </div>
+
+              {/* ID Badge Footer Details */}
+              <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 font-mono">
+                <span className="text-slate-500">INCUBATION INTERN</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                  ACTIVE SCAN READY
+                </span>
+              </div>
             </div>
-            <div className="text-sm font-semibold text-slate-300">Point Handheld Scanner or Swipe ID Card</div>
-            <div className="text-xs text-slate-500 mt-1">Automatic detection active</div>
+
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-400 font-medium">
+              <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                <rect x="3" y="11" width="18" height="10" rx="2" />
+              </svg>
+              <span>Swipe or point USB/Wireless barcode scanner at student ID card</span>
+            </div>
           </div>
 
           {/* Auto-focused Input Form for Scanner & Manual Typing */}
@@ -533,9 +627,104 @@ export default function ScanToken() {
 
       {/* SCANNING IN PROGRESS STAGE */}
       {state === 'scanning' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-white space-y-3">
-          <div className="w-8 h-8 border-3 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
-          <div className="text-sm font-mono font-semibold text-amber-300">Verifying ID {scannedId}...</div>
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-white space-y-4 shadow-xl">
+          <div className="relative w-full py-6 px-4 bg-slate-950 rounded-xl border border-emerald-500/30 overflow-hidden flex flex-col items-center justify-center select-none">
+            {/* Viewfinder Corner Reticles in Emerald */}
+            <div className="absolute top-3 left-3 w-5 h-5 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
+            <div className="absolute top-3 right-3 w-5 h-5 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
+            <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
+            <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-emerald-400 rounded-br" />
+
+            {/* Stylized ID Card with Neon Emerald Decoding Laser */}
+            <div className="relative z-10 w-full max-w-sm bg-linear-to-b from-slate-900 to-slate-950 border border-emerald-500/50 rounded-xl p-3.5 shadow-2xl overflow-hidden">
+              <div className="absolute left-0 right-0 h-[2.5px] bg-emerald-400 shadow-[0_0_16px_#10b981,0_0_30px_#10b981] animate-laser z-20 pointer-events-none">
+                <div className="absolute inset-0 bg-white blur-[0.5px]" />
+                <div className="absolute -top-3 -bottom-3 left-0 right-0 bg-emerald-500/20 blur-xs" />
+              </div>
+
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-[10px] text-slate-400">
+                <span className="font-bold text-slate-300">SRI SAIRAM ENGINEERING COLLEGE</span>
+                <span className="font-mono text-emerald-400 font-bold animate-pulse">DECODING...</span>
+              </div>
+
+              <div className="my-2.5 bg-white rounded-lg p-2.5 shadow-inner flex flex-col items-center justify-center opacity-95">
+                <svg className="w-full h-11 text-slate-900 opacity-80" viewBox="0 0 280 44" fill="currentColor">
+                  {/* Left Guard */}
+                  <rect x="0" y="0" width="3" height="44" />
+                  <rect x="5" y="0" width="2" height="44" />
+                  {/* Left Data Bars */}
+                  <rect x="10" y="0" width="4" height="40" />
+                  <rect x="16" y="0" width="1" height="40" />
+                  <rect x="19" y="0" width="3" height="40" />
+                  <rect x="25" y="0" width="6" height="40" />
+                  <rect x="33" y="0" width="2" height="40" />
+                  <rect x="38" y="0" width="4" height="40" />
+                  <rect x="44" y="0" width="1" height="40" />
+                  <rect x="47" y="0" width="5" height="40" />
+                  <rect x="54" y="0" width="2" height="40" />
+                  <rect x="58" y="0" width="3" height="40" />
+                  <rect x="64" y="0" width="1" height="40" />
+                  <rect x="67" y="0" width="6" height="40" />
+                  <rect x="75" y="0" width="2" height="40" />
+                  <rect x="80" y="0" width="4" height="40" />
+                  <rect x="86" y="0" width="3" height="40" />
+                  <rect x="91" y="0" width="1" height="40" />
+                  <rect x="94" y="0" width="5" height="40" />
+                  <rect x="101" y="0" width="2" height="40" />
+                  <rect x="105" y="0" width="4" height="40" />
+                  <rect x="111" y="0" width="1" height="40" />
+                  <rect x="114" y="0" width="6" height="40" />
+                  <rect x="122" y="0" width="3" height="40" />
+                  <rect x="127" y="0" width="2" height="40" />
+                  <rect x="131" y="0" width="5" height="40" />
+                  <rect x="138" y="0" width="1" height="40" />
+                  {/* Center Guard */}
+                  <rect x="142" y="0" width="2" height="44" />
+                  <rect x="146" y="0" width="2" height="44" />
+                  {/* Right Data Bars */}
+                  <rect x="151" y="0" width="4" height="40" />
+                  <rect x="157" y="0" width="2" height="40" />
+                  <rect x="161" y="0" width="5" height="40" />
+                  <rect x="168" y="0" width="1" height="40" />
+                  <rect x="171" y="0" width="3" height="40" />
+                  <rect x="176" y="0" width="6" height="40" />
+                  <rect x="184" y="0" width="2" height="40" />
+                  <rect x="188" y="0" width="4" height="40" />
+                  <rect x="194" y="0" width="1" height="40" />
+                  <rect x="197" y="0" width="5" height="40" />
+                  <rect x="204" y="0" width="3" height="40" />
+                  <rect x="209" y="0" width="2" height="40" />
+                  <rect x="213" y="0" width="6" height="40" />
+                  <rect x="221" y="0" width="1" height="40" />
+                  <rect x="224" y="0" width="4" height="40" />
+                  <rect x="230" y="0" width="3" height="40" />
+                  <rect x="235" y="0" width="5" height="40" />
+                  <rect x="242" y="0" width="2" height="40" />
+                  <rect x="246" y="0" width="4" height="40" />
+                  <rect x="252" y="0" width="1" height="40" />
+                  <rect x="255" y="0" width="6" height="40" />
+                  <rect x="263" y="0" width="2" height="40" />
+                  <rect x="267" y="0" width="4" height="40" />
+                  {/* Right Guard */}
+                  <rect x="274" y="0" width="2" height="44" />
+                  <rect x="278" y="0" width="2" height="44" />
+                </svg>
+                <div className="text-[10px] font-mono tracking-[0.3em] text-emerald-800 font-bold mt-1 text-center select-none">
+                  * {scannedId || 'READING'} *
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 font-mono">
+                <span className="text-slate-500">DATABASE QUERY</span>
+                <span className="text-emerald-400 font-semibold font-mono">MATCHING ELIGIBILITY...</span>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 text-xs text-amber-300 font-mono">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-spin border border-amber-300 border-t-transparent" />
+              <span>Verifying ID {scannedId} against today's eligibility list...</span>
+            </div>
+          </div>
         </div>
       )}
 

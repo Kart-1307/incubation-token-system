@@ -176,25 +176,6 @@ function getRealPrisma(): PrismaClient | null {
       });
 
       globalStore._prismaClient = client;
-
-      // Seed default staff user asynchronously if table is empty
-      client.staffUser.findFirst().then((existing: any) => {
-        if (!existing) {
-          return client.staffUser.upsert({
-            where: { id: 'staff-001' },
-            update: {},
-            create: {
-              id: 'staff-001',
-              username: 'staff',
-              email: 'incubation@sairam.edu.in',
-              name: 'Incubation Centre Staff',
-              passwordHash: '$2b$10$w09ZkZ7pZ1j3iI2/zD386uvLhHkJgQ0eCgG0nK3zR87m1oZ5l1u4u',
-            },
-          });
-        }
-      }).catch((err: any) => {
-        console.warn('Auto staff seed warning:', err?.message || err);
-      });
     } catch (e) {
       console.warn('PrismaClient failed to instantiate, using resilient store:', e);
     }
