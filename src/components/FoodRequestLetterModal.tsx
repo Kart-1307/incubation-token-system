@@ -13,9 +13,10 @@ interface FoodRequestLetterModalProps {
   onClose: () => void;
   foodDate: string;
   studentsList: StudentInfo[];
+  projectsList?: string[];
 }
 
-interface LetterDocState {
+export interface LetterDocState {
   date: string;
   fromName: string;
   fromRollNo: string;
@@ -26,6 +27,7 @@ interface LetterDocState {
   recipientLocation: string;
   subject: string;
   salutation: string;
+  involvedProjects: string;
   bodyText: string;
   signOffText: string;
   page2Title: string;
@@ -33,71 +35,147 @@ interface LetterDocState {
   studentsList: StudentInfo[];
 }
 
+const STORAGE_KEY = 'incubation_letter_draft';
+
 export default function FoodRequestLetterModal({
   isOpen,
   onClose,
   foodDate,
   studentsList,
+  projectsList = [],
 }: FoodRequestLetterModalProps) {
   const [viewMode, setViewMode] = useState<'both' | 'page1' | 'page2'>('both');
   const [isEditMode, setIsEditMode] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [mounted, setMounted] = useState(false);
 
-  // Format date as DD/MM/YY (matching handwritten letter style: 23/09/26)
+  // Format date as DD/MM/YY (matching handwritten letter style: 23/09/26, 29/09/26)
   let formattedDate = foodDate;
   if (/^\d{4}-\d{2}-\d{2}$/.test(foodDate)) {
     const [y, m, d] = foodDate.split('-');
     formattedDate = `${d}/${m}/${y.slice(2)}`;
   }
 
-  // Generate initial default document state
-  const buildDefaultDoc = (): LetterDocState => ({
-    date: formattedDate,
+  const formatBody = (projects: string, date: string) => {
+    const p = projects.trim() || '____________________';
+    return `Our Incubation teams has involved in ${p}, So, i request you to give permission for night stay on ${date}. I also request you to provide food tokens. The student's list is attached with this letter.`;
+  };
+
+  const defaultProjects = Array.isArray(projectsList) && projectsList.length > 0
+    ? projectsList.join(', ')
+    : '';
+
+  // Generate initial default document state matching the physical handwritten letter
+  const buildDefaultDoc = (dateStr: string = formattedDate): LetterDocState => ({
+    date: dateStr,
     fromName: '',
     fromRollNo: '',
     fromCollege: 'Sri Sai Ram Engineering College',
     fromLocation: 'Chennai – 44',
     recipientTitle: 'The Principal',
     recipientCollege: 'Sri Sai Ram Engineering College',
-    recipientLocation: 'Chennai – 44',
-    subject: `Request for Night stay in Incubation on ${formattedDate}`,
+    recipientLocation: 'Chennai -44',
+    subject: `sub: Request for Night stay in Incubation on ${dateStr}`,
     salutation: 'Respected Sir,',
-    bodyText: `Our Incubation teams has involved in incubation development activities. So, I request you to give permission for night stay on ${formattedDate}. I also request you to provide food tokens. The student's list is attached with this letter.`,
+    involvedProjects: defaultProjects,
+    bodyText: formatBody(defaultProjects, dateStr),
     signOffText: 'Yours Truly,',
     page2Title: 'List of Students Requiring Food Arrangement',
-    page2Subtitle: `Food Date: ${formattedDate}   |   Total Students: ${studentsList.length}`,
+    page2Subtitle: `Food Date: ${dateStr}   |   Total Students: ${studentsList.length}`,
     studentsList: studentsList.map(s => ({ ...s })),
   });
 
-  const [letterDoc, setLetterDoc] = useState<LetterDocState>(buildDefaultDoc);
+  const [letterDoc, setLetterDoc] = useState<LetterDocState>(() => buildDefaultDoc());
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // When opening or when input props change, load default or saved session draft
+  // When modal opens, load saved persistent draft from localStorage (never wipe old draft!)
   useEffect(() => {
-    if (isOpen) {
-      try {
-        const savedDraft = sessionStorage.getItem('incubation_letter_draft');
-        if (savedDraft) {
-          const parsed = JSON.parse(savedDraft) as LetterDocState;
-          setLetterDoc(parsed);
-          return;
-        }
-      } catch {}
-      setLetterDoc(buildDefaultDoc());
-    }
-  }, [isOpen, foodDate, studentsList]);
+    if (!isOpen) return;
 
-  // Persist edits to sessionStorage
+    try {
+      localStorage.removeItem('incubation_food_letter_doc_v3');
+      localStorage.removeItem('incubation_food_letter_doc');
+      sessionStorage.removeItem('incubation_food_letter_doc_v3');
+
+      const stored = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<LetterDocState>;
+        const mergedProjects = parsed.involvedProjects !== undefined
+          ? parsed.involvedProjects
+          : defaultProjects;
+
+        const savedName = parsed.fromName && parsed.fromName !== 'Karthikeyan S' ? parsed.fromName : '';
+        const savedRollNo = parsed.fromRollNo && parsed.fromRollNo !== 'SEC24CS110' ? parsed.fromRollNo : '';
+
+        const merged: LetterDocState = {
+          date: formattedDate,
+          fromName: savedName,
+          fromRollNo: savedRollNo,
+          fromCollege: parsed.fromCollege || 'Sri Sai Ram Engineering College',
+          fromLocation: parsed.fromLocation || 'Chennai – 44',
+          recipientTitle: parsed.recipientTitle || 'The Principal',
+          recipientCollege: parsed.recipientCollege || 'Sri Sai Ram Engineering College',
+          recipientLocation: parsed.recipientLocation || 'Chennai -44',
+          subject: `Sub: Request for Night stay in Incubation on ${formattedDate}`,
+          salutation: parsed.salutation || 'Respected Sir,',
+          involvedProjects: mergedProjects,
+          bodyText: parsed.bodyText && !parsed.bodyText.includes('has involved in .')
+            ? parsed.bodyText
+            : formatBody(mergedProjects, formattedDate),
+          signOffText: parsed.signOffText || 'Yours Truly,',
+          page2Title: parsed.page2Title || 'List of Students Requiring Food Arrangement',
+          page2Subtitle: `Food Date: ${formattedDate}   |   Total Students: ${studentsList.length}`,
+          studentsList: studentsList.length > 0 ? studentsList.map(s => ({ ...s })) : (parsed.studentsList || []),
+        };
+
+        if (parsed.fromName === 'Karthikeyan S' || parsed.fromRollNo === 'SEC24CS110') {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        }
+
+        setLetterDoc(merged);
+        return;
+      }
+    } catch { }
+
+    setLetterDoc(buildDefaultDoc(formattedDate));
+  }, [isOpen, foodDate]);
+
+  // Persist draft updates to localStorage immediately
+  const persistDraft = (nextState: LetterDocState) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+    } catch { }
+  };
+
   const updateField = <K extends keyof LetterDocState>(field: K, value: LetterDocState[K]) => {
     setLetterDoc(prev => {
       const next = { ...prev, [field]: value };
-      try {
-        sessionStorage.setItem('incubation_letter_draft', JSON.stringify(next));
-      } catch {}
+      persistDraft(next);
+      return next;
+    });
+  };
+
+  const handleNameChange = (val: string) => {
+    updateField('fromName', val);
+  };
+
+  const handleRollNoChange = (val: string) => {
+    updateField('fromRollNo', val);
+  };
+
+  const handleProjectsChange = (val: string) => {
+    setLetterDoc(prev => {
+      const next: LetterDocState = {
+        ...prev,
+        involvedProjects: val,
+        bodyText: formatBody(val, prev.date),
+      };
+      persistDraft(next);
       return next;
     });
   };
@@ -111,9 +189,7 @@ export default function FoodRequestLetterModal({
         studentsList: nextList,
         page2Subtitle: `Food Date: ${prev.date}   |   Total Students: ${nextList.length}`,
       };
-      try {
-        sessionStorage.setItem('incubation_letter_draft', JSON.stringify(next));
-      } catch {}
+      persistDraft(next);
       return next;
     });
   };
@@ -126,9 +202,7 @@ export default function FoodRequestLetterModal({
         studentsList: nextList,
         page2Subtitle: `Food Date: ${prev.date}   |   Total Students: ${nextList.length}`,
       };
-      try {
-        sessionStorage.setItem('incubation_letter_draft', JSON.stringify(next));
-      } catch {}
+      persistDraft(next);
       return next;
     });
   };
@@ -141,19 +215,20 @@ export default function FoodRequestLetterModal({
         studentsList: nextList,
         page2Subtitle: `Food Date: ${prev.date}   |   Total Students: ${nextList.length}`,
       };
-      try {
-        sessionStorage.setItem('incubation_letter_draft', JSON.stringify(next));
-      } catch {}
+      persistDraft(next);
       return next;
     });
   };
 
   const handleResetToDefaults = () => {
-    if (window.confirm('Reset all text, header, and table fields back to the original defaults?')) {
+    if (window.confirm('Reset this letter back to standard institutional defaults?')) {
       try {
-        sessionStorage.removeItem('incubation_letter_draft');
-      } catch {}
-      setLetterDoc(buildDefaultDoc());
+        localStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(STORAGE_KEY);
+      } catch { }
+      const fresh = buildDefaultDoc(formattedDate);
+      setLetterDoc(fresh);
+      persistDraft(fresh);
     }
   };
 
@@ -170,17 +245,21 @@ export default function FoodRequestLetterModal({
     generateFoodRequestLetterPdf(
       letterDoc.fromName,
       letterDoc.fromRollNo,
-      '',
+      letterDoc.involvedProjects,
       letterDoc.date,
       letterDoc.studentsList,
       letterDoc
     );
   };
 
-  // Dedicated 2-page print document portal (rendered directly in body to avoid modal overflow/clipping)
+  const handlePrint = () => {
+    window.print();
+  };
+
+  // Dedicated 2-page print document portal (rendered directly in body to avoid modal overflow/fixed clipping)
   const printableDocument = (
     <div id="food-letter-printable" className="hidden print:block text-slate-900 bg-white">
-      {/* PAGE 1 (PRINT) */}
+      {/* PAGE 1 (PRINT) - Official Letter */}
       <div className="print-page-1">
         <div>
           {/* Date */}
@@ -208,7 +287,6 @@ export default function FoodRequestLetterModal({
 
           {/* SUBJECT */}
           <div className="text-sm font-serif my-5">
-            <span className="font-bold">Sub: </span>
             <span>{letterDoc.subject}</span>
           </div>
 
@@ -236,7 +314,7 @@ export default function FoodRequestLetterModal({
         <div className="text-center text-xs font-serif text-slate-400 pt-6">Page 1 of 2</div>
       </div>
 
-      {/* PAGE 2 (PRINT) */}
+      {/* PAGE 2 (PRINT) - Student Table */}
       <div className="print-page-2">
         <div>
           <div className="text-center mb-6 pt-4">
@@ -284,25 +362,19 @@ export default function FoodRequestLetterModal({
       <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto">
         {/* Main UI Modal (hidden during window.print) */}
         <div className="print:hidden bg-slate-100 rounded-2xl shadow-2xl border border-slate-300 w-full max-w-5xl max-h-[94vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-          
-          {/* Modal Top Header Bar */}
-          <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0 border-b border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400 font-bold">
-                📄
-              </div>
+
+          {/* Top Dark Header with Field-Wise Inputs (Exactly as afternoon photo media_1790691392417.png) */}
+          <div className="bg-slate-900 border-b border-indigo-900/60 p-4 sm:p-5 text-white shrink-0">
+            <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-white tracking-tight">Official Food Request Letter</span>
-                  <span className="px-2 py-0.5 rounded bg-indigo-950 border border-indigo-800 text-indigo-300 text-[10px] font-mono font-semibold">
-                    DATE: {letterDoc.date}
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+                    OFFICIAL DOCUMENT
                   </span>
+                  <span className="text-xs text-slate-300">Night Stay Permission & Food Tokens Request</span>
                 </div>
-                <div className="text-xs text-slate-400">Night Stay Permission & Food Tokens Request</div>
+                <h3 className="text-base font-bold text-white mt-1">Food Request Letter Generator</h3>
               </div>
-            </div>
-
-            <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
@@ -313,54 +385,95 @@ export default function FoodRequestLetterModal({
                 </svg>
               </button>
             </div>
+
+            {/* 3 Dedicated Top Input Fields: Representative Name, Roll No / ID, Involved Incubation Projects */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                  Representative Name
+                </label>
+                <input
+                  type="text"
+                  value={letterDoc.fromName}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  placeholder="Enter representative name"
+                  className="w-full bg-white text-slate-900 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                  Roll No / Student ID
+                </label>
+                <input
+                  type="text"
+                  value={letterDoc.fromRollNo}
+                  onChange={(e) => handleRollNoChange(e.target.value)}
+                  placeholder="Enter Roll No / Student ID"
+                  className="w-full bg-white text-slate-900 px-3 py-2 text-xs font-mono font-semibold rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                  Involved Incubation Projects
+                </label>
+                <input
+                  type="text"
+                  value={letterDoc.involvedProjects}
+                  onChange={(e) => handleProjectsChange(e.target.value)}
+                  placeholder="Enter involved incubation projects"
+                  className="w-full bg-white text-slate-900 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Action & View Mode Toolbar */}
           <div className="bg-white border-b border-slate-200 px-5 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
             {/* Left: View Mode Pills */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
-              <button
-                type="button"
-                onClick={() => setViewMode('both')}
-                className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
-                  viewMode === 'both' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All Pages
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('page1')}
-                className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
-                  viewMode === 'page1' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Page 1 (Letter)
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('page2')}
-                className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
-                  viewMode === 'page2' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Page 2 (Table)
-              </button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-medium">Preview:</span>
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('both')}
+                  className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${viewMode === 'both' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                >
+                  Both Pages
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('page1')}
+                  className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${viewMode === 'page1' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                >
+                  Page 1 (Letter)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('page2')}
+                  className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${viewMode === 'page2' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                >
+                  Page 2 (Table)
+                </button>
+              </div>
             </div>
 
             {/* Right: Universal Edit Toggle & Actions */}
             <div className="flex items-center gap-2">
-              {/* Universal In-Place Edit Mode Button */}
               <button
                 type="button"
                 onClick={() => setIsEditMode(!isEditMode)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs border ${
-                  isEditMode
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs border ${isEditMode
                     ? 'bg-amber-500 text-slate-950 border-amber-600 ring-2 ring-amber-300'
-                    : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                }`}
+                    : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                  }`}
+                title="Toggle in-place text editing on any part of the letter"
               >
-                <span>{isEditMode ? '✓ Editing Mode: Active' : '✏️ Edit Letter (Any Part)'}</span>
+                <span>{isEditMode ? '✓ Done Editing' : '✏️ Edit Letter (Any Part)'}</span>
               </button>
 
               {isEditMode && (
@@ -376,35 +489,35 @@ export default function FoodRequestLetterModal({
 
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="bg-slate-800 hover:bg-slate-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                onClick={handlePrint}
+                className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
               >
-                <span>🖨️ Print</span>
+                <span>🖨️ Print Letter</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleDownloadPdf}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
               >
                 <span>📥 Download PDF</span>
               </button>
             </div>
           </div>
 
-          {/* Active Editing Instructions Banner */}
+          {/* Active In-Place Editing Instructions Banner */}
           {isEditMode && (
             <div className="bg-amber-50 border-b border-amber-200 px-5 py-2 flex items-center justify-between text-xs text-amber-900 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                 <span className="font-semibold">In-Place Document Editing Mode Active:</span>
-                <span>Click directly on ANY text, name, subject, body paragraph, or table cell on the letter below to edit it.</span>
+                <span>Click directly on any text, subject, body paragraph, or table cell on the letter below to customize.</span>
               </div>
               <button
                 onClick={() => setIsEditMode(false)}
                 className="font-bold text-amber-800 underline hover:text-amber-950 cursor-pointer text-xs"
               >
-                Done Editing
+                Done
               </button>
             </div>
           )}
@@ -417,14 +530,14 @@ export default function FoodRequestLetterModal({
 
           {/* Scrollable Document Canvas Preview Area */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-200/90 flex flex-col items-center gap-8">
-            
+
             {/* ========================================================= */}
             {/* A4 PAGE 1: OFFICIAL REQUEST LETTER */}
             {/* ========================================================= */}
             {(viewMode === 'both' || viewMode === 'page1') && (
               <div className="w-full max-w-[210mm] bg-white rounded-sm shadow-xl p-8 sm:p-14 font-serif text-slate-900 border border-slate-300 relative min-h-[297mm] flex flex-col justify-between select-text">
                 <div>
-                  {/* Date (Right aligned) */}
+                  {/* Date (Right aligned: "DATE: DD/MM/YY") */}
                   <div className="text-right text-sm mb-6 pt-2 font-serif flex justify-end items-center gap-1">
                     <span className="font-semibold">DATE:</span>
                     {isEditMode ? (
@@ -445,119 +558,118 @@ export default function FoodRequestLetterModal({
                   <div className="space-y-6 text-sm font-serif leading-relaxed mb-6">
                     {/* FROM Section */}
                     <div>
-                      <div className="font-bold text-xs uppercase tracking-wider text-slate-600 mb-1">FROM,</div>
+                      <div className="font-bold text-xs uppercase tracking-wider text-slate-700 mb-1">FROM,</div>
                       {isEditMode ? (
                         <div className="space-y-1 max-w-sm">
                           <input
                             type="text"
                             value={letterDoc.fromName}
-                            onChange={(e) => updateField('fromName', e.target.value)}
-                            placeholder="Student Representative Name"
-                            className="w-full font-bold text-base text-slate-900 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            onChange={(e) => handleNameChange(e.target.value)}
+                            placeholder="Representative Name"
+                            className="w-full font-bold text-base bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                           <input
                             type="text"
                             value={letterDoc.fromRollNo}
-                            onChange={(e) => updateField('fromRollNo', e.target.value)}
-                            placeholder="Roll Number (e.g. 23CS101)"
-                            className="w-full font-mono text-xs text-slate-700 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            onChange={(e) => handleRollNoChange(e.target.value)}
+                            placeholder="Roll No / Student ID"
+                            className="w-full font-mono text-xs bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                           <input
                             type="text"
                             value={letterDoc.fromCollege}
                             onChange={(e) => updateField('fromCollege', e.target.value)}
-                            className="w-full text-slate-700 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            className="w-full text-xs bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                           <input
                             type="text"
                             value={letterDoc.fromLocation}
                             onChange={(e) => updateField('fromLocation', e.target.value)}
-                            className="w-full text-slate-700 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            className="w-full text-xs bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                         </div>
                       ) : (
                         <div>
-                          <div className="font-bold text-slate-900 text-base">
-                            {letterDoc.fromName.trim() || '____________________'}
-                          </div>
+                          <div className="font-bold text-base">{letterDoc.fromName || '____________________'}</div>
                           {letterDoc.fromRollNo && (
-                            <div className="font-mono text-xs text-slate-700">{letterDoc.fromRollNo}</div>
+                            <div className="font-mono text-xs">{letterDoc.fromRollNo}</div>
                           )}
-                          <div className="text-slate-700">{letterDoc.fromCollege}</div>
-                          <div className="text-slate-700">{letterDoc.fromLocation}</div>
+                          <div>{letterDoc.fromCollege}</div>
+                          <div>{letterDoc.fromLocation}</div>
                         </div>
                       )}
                     </div>
 
                     {/* TO Section */}
                     <div>
-                      <div className="font-bold text-xs uppercase tracking-wider text-slate-600 mb-1">TO,</div>
+                      <div className="font-bold text-xs uppercase tracking-wider text-slate-700 mb-1">TO,</div>
                       {isEditMode ? (
                         <div className="space-y-1 max-w-sm">
                           <input
                             type="text"
                             value={letterDoc.recipientTitle}
                             onChange={(e) => updateField('recipientTitle', e.target.value)}
-                            className="w-full font-semibold text-slate-900 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            className="w-full font-semibold text-sm bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                           <input
                             type="text"
                             value={letterDoc.recipientCollege}
                             onChange={(e) => updateField('recipientCollege', e.target.value)}
-                            className="w-full text-slate-700 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            className="w-full text-xs bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                           <input
                             type="text"
                             value={letterDoc.recipientLocation}
                             onChange={(e) => updateField('recipientLocation', e.target.value)}
-                            className="w-full text-slate-700 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                            className="w-full text-xs bg-amber-50/80 px-2 py-0.5 border-b border-dashed border-amber-500 outline-none rounded"
                           />
                         </div>
                       ) : (
                         <div>
-                          <div className="font-semibold text-slate-900">{letterDoc.recipientTitle}</div>
-                          <div className="text-slate-700">{letterDoc.recipientCollege}</div>
-                          <div className="text-slate-700">{letterDoc.recipientLocation}</div>
+                          <div className="font-semibold">{letterDoc.recipientTitle}</div>
+                          <div>{letterDoc.recipientCollege}</div>
+                          <div>{letterDoc.recipientLocation}</div>
                         </div>
                       )}
                     </div>
                   </div>
 
                   {/* SUBJECT */}
-                  <div className="text-sm font-serif my-5 flex items-baseline gap-1">
-                    <span className="font-bold shrink-0">Sub: </span>
+                  <div className="text-sm font-serif my-5">
                     {isEditMode ? (
-                      <input
-                        type="text"
-                        value={letterDoc.subject}
-                        onChange={(e) => updateField('subject', e.target.value)}
-                        className="w-full font-serif text-sm bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={letterDoc.subject}
+                          onChange={(e) => updateField('subject', e.target.value)}
+                          className="w-full bg-amber-50/80 border-b border-dashed border-amber-500 px-2 py-0.5 font-serif text-sm outline-none rounded"
+                        />
+                      </div>
                     ) : (
                       <span>{letterDoc.subject}</span>
                     )}
                   </div>
 
                   {/* LETTER BODY */}
-                  <div className="space-y-3 text-sm font-serif leading-relaxed text-slate-800 text-justify">
+                  <div className="space-y-4 text-sm font-serif leading-relaxed text-justify">
                     {isEditMode ? (
-                      <div className="space-y-2">
+                      <div>
                         <input
                           type="text"
                           value={letterDoc.salutation}
                           onChange={(e) => updateField('salutation', e.target.value)}
-                          className="font-bold text-slate-900 bg-amber-50/80 hover:bg-amber-100 border-b border-dashed border-amber-500 px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 rounded w-48"
+                          className="font-bold bg-amber-50/80 border-b border-dashed border-amber-500 px-2 py-0.5 mb-2 outline-none rounded text-sm block"
                         />
                         <textarea
-                          rows={6}
+                          rows={4}
                           value={letterDoc.bodyText}
                           onChange={(e) => updateField('bodyText', e.target.value)}
-                          className="w-full bg-amber-50/80 hover:bg-amber-100 border-2 border-dashed border-amber-500 p-2.5 leading-relaxed text-justify font-serif text-sm outline-none focus:ring-2 focus:ring-indigo-500 rounded-lg resize-y"
+                          className="w-full bg-amber-50/80 border border-dashed border-amber-500 p-2.5 font-serif text-sm leading-relaxed rounded outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                     ) : (
                       <div>
-                        <div className="font-bold text-slate-900 mb-2">{letterDoc.salutation}</div>
+                        <div className="font-bold mb-2">{letterDoc.salutation}</div>
                         <p className="leading-relaxed whitespace-pre-line">
                           {letterDoc.bodyText}
                         </p>
@@ -567,18 +679,18 @@ export default function FoodRequestLetterModal({
 
                   {/* SIGN OFF */}
                   <div className="mt-16 text-sm font-serif flex flex-col items-end">
-                    <div className="text-right flex flex-col items-end">
+                    <div className="text-right">
                       {isEditMode ? (
-                        <div className="space-y-1 w-64 text-right flex flex-col items-end">
+                        <div className="space-y-1 w-56 text-right">
                           <input
                             type="text"
                             value={letterDoc.signOffText}
                             onChange={(e) => updateField('signOffText', e.target.value)}
-                            className="bg-amber-50/80 border-b border-dashed border-amber-500 px-1.5 py-0.5 text-right font-serif outline-none w-36"
+                            className="w-full text-right bg-amber-50/80 border-b border-dashed border-amber-500 px-2 py-0.5 text-sm outline-none rounded"
                           />
                           <div className="h-10"></div>
                           <div className="font-bold text-base text-slate-900">
-                            {letterDoc.fromName.trim() || '____________________'}
+                            {letterDoc.fromName || '____________________'}
                           </div>
                           {letterDoc.fromRollNo && (
                             <div className="text-xs font-mono text-slate-600">{letterDoc.fromRollNo}</div>
@@ -589,7 +701,7 @@ export default function FoodRequestLetterModal({
                           <div>{letterDoc.signOffText}</div>
                           <div className="h-14"></div>
                           <div className="font-bold text-base text-slate-900">
-                            {letterDoc.fromName.trim() || '____________________'}
+                            {letterDoc.fromName || '____________________'}
                           </div>
                           {letterDoc.fromRollNo && (
                             <div className="text-xs font-mono text-slate-600">{letterDoc.fromRollNo}</div>

@@ -6,7 +6,17 @@ import Badge from '@/components/Badge';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
-import { getMealSession, getTokenEffectiveSession, getTodayISTDateString } from '@/utils/timeUtils';
+import {
+  getMealSession,
+  getTokenEffectiveSession,
+  getTodayISTDateString,
+  getPreviousISTDateString,
+  getNextISTDateString,
+  formatISTDateDMY,
+  formatISTDateShort,
+  formatISTDateWithDay,
+  formatISTTime,
+} from '@/utils/timeUtils';
 
 interface CachedDashboardPayload {
   date: string;
@@ -48,6 +58,7 @@ export default function Dashboard() {
   const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
   const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
   const [loading, setLoading] = useState(() => !initialCache);
+  const [overnightStayCount, setOvernightStayCount] = useState<number>(0);
 
   const loadData = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -57,6 +68,7 @@ export default function Dashboard() {
       setTokensList(bundle.tokens);
       setStudentRegistry(bundle.students);
       setProjectRegistry(bundle.projects);
+      setOvernightStayCount(bundle.overnightStayCount || 0);
 
       const payload: CachedDashboardPayload = {
         date: todayStr,
@@ -109,8 +121,35 @@ export default function Dashboard() {
   }, [loadData]);
 
   const currentSession = getMealSession();
-  const eligibleCount = todayList?.entries.length ?? 0;
+  const yesterdayStr = useMemo(() => getPreviousISTDateString(todayStr), [todayStr]);
+  const tomorrowStr = useMemo(() => getNextISTDateString(todayStr), [todayStr]);
+
+  const formattedDateStr = useMemo(() => {
+    try {
+      const [y, m, d] = todayStr.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+      return dt.toLocaleDateString('en-IN', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata',
+      });
+    } catch {
+      return todayStr;
+    }
+  }, [todayStr]);
+
+  const isBreakfastOrLunch = currentSession === 'BREAKFAST' || currentSession === 'LUNCH';
+  const rawEligibleCount = todayList?.entries.length ?? 0;
+  const isCarriedOver = rawEligibleCount === 0 && isBreakfastOrLunch && overnightStayCount > 0;
+  const eligibleCount = rawEligibleCount > 0 ? rawEligibleCount : (isBreakfastOrLunch ? overnightStayCount : 0);
   const tokensGeneratedCount = tokensList.length;
+
+  // Meal-specific eligibility pools
+  const breakfastApproved = rawEligibleCount > 0 ? rawEligibleCount : overnightStayCount;
+  const lunchApproved = rawEligibleCount > 0 ? rawEligibleCount : overnightStayCount;
+  const dinnerApproved = rawEligibleCount;
 
   // Meal Session Breakdown Counts
   const mealSessionCounts = useMemo(() => {
@@ -125,21 +164,124 @@ export default function Dashboard() {
     };
   }, [tokensList]);
 
+  // Last token issued timestamp per session
+  const lastTokenTime = useMemo(() => {
+    const res: Record<string, string | null> = { BREAKFAST: null, LUNCH: null, DINNER: null };
+    for (const t of tokensList) {
+      const sess = getTokenEffectiveSession(t);
+      if (!res[sess] && t.time) {
+        res[sess] = t.time;
+      }
+    }
+    return res;
+  }, [tokensList]);
+
+  // Detailed Meal Session Metadata & Cycle Tracking
+  const sessionConfig = useMemo(() => {
+    const isTodayDraftOrEmpty = rawEligibleCount === 0;
+
+    const isCurrentlyDinner = currentSession === 'DINNER';
+    const isCurrentlyLunch = currentSession === 'LUNCH';
+    const isCurrentlyBreakfast = currentSession === 'BREAKFAST';
+
+    // Dates for each meal:
+    // When viewing during DINNER (tonight), breakfast and lunch belong to tomorrow's overnight stay!
+    const breakfastTargetDate = isCurrentlyDinner ? tomorrowStr : todayStr;
+    const lunchTargetDate = isCurrentlyDinner ? tomorrowStr : todayStr;
+    const dinnerTargetDate = todayStr;
+
+    return {
+      BREAKFAST: {
+        id: 'BREAKFAST',
+        name: 'Breakfast',
+        icon: '🌅',
+        timing: '07:30 AM – 10:00 AM IST',
+        targetDate: breakfastTargetDate,
+        dateFormatted: formatISTDateDMY(breakfastTargetDate),
+        dayBadge: isCurrentlyDinner ? 'Tomorrow Morning' : (isCurrentlyBreakfast ? 'This Morning' : 'Earlier Today'),
+        status: isCurrentlyBreakfast ? 'ACTIVE' : (isCurrentlyLunch ? 'COMPLETED' : 'UPCOMING'),
+        statusLabel: isCurrentlyDinner ? 'Opens Tomorrow 07:30 AM' : (isCurrentlyBreakfast ? 'Active Now' : (isCurrentlyLunch ? 'Completed' : 'Upcoming')),
+        approved: breakfastApproved,
+        issued: isCurrentlyDinner ? 0 : mealSessionCounts.BREAKFAST,
+        pending: isCurrentlyDinner ? breakfastApproved : Math.max(0, breakfastApproved - mealSessionCounts.BREAKFAST),
+        turnout: isCurrentlyDinner ? 0 : (breakfastApproved > 0 ? Math.min(100, Math.round((mealSessionCounts.BREAKFAST / breakfastApproved) * 100)) : 0),
+        cycleLabel: isCurrentlyDinner
+          ? `Night Stay (${formatISTDateDMY(todayStr)})`
+          : (!isTodayDraftOrEmpty
+              ? `Approved List (${formatISTDateDMY(todayStr)})`
+              : (overnightStayCount > 0 ? `Night Stay (${formatISTDateDMY(yesterdayStr)})` : `No Approved List`)),
+        isNightCarryover: isCurrentlyDinner || (isTodayDraftOrEmpty && overnightStayCount > 0),
+        isFutureScheduled: isCurrentlyDinner,
+        lastTime: isCurrentlyDinner ? null : lastTokenTime.BREAKFAST,
+      },
+      LUNCH: {
+        id: 'LUNCH',
+        name: 'Lunch',
+        icon: '☀️',
+        timing: '12:00 PM – 03:30 PM IST',
+        targetDate: lunchTargetDate,
+        dateFormatted: formatISTDateDMY(lunchTargetDate),
+        dayBadge: isCurrentlyDinner ? 'Tomorrow Afternoon' : (isCurrentlyLunch ? 'This Afternoon' : 'Today Afternoon'),
+        status: isCurrentlyLunch ? 'ACTIVE' : 'UPCOMING',
+        statusLabel: isCurrentlyDinner ? 'Opens Tomorrow 12:00 PM' : (isCurrentlyLunch ? 'Active Now' : 'Opens Today 12:00 PM'),
+        approved: lunchApproved,
+        issued: isCurrentlyDinner ? 0 : mealSessionCounts.LUNCH,
+        pending: isCurrentlyDinner ? lunchApproved : Math.max(0, lunchApproved - mealSessionCounts.LUNCH),
+        turnout: isCurrentlyDinner ? 0 : (lunchApproved > 0 ? Math.min(100, Math.round((mealSessionCounts.LUNCH / lunchApproved) * 100)) : 0),
+        cycleLabel: isCurrentlyDinner
+          ? `Night Stay (${formatISTDateDMY(todayStr)})`
+          : (!isTodayDraftOrEmpty
+              ? `Approved List (${formatISTDateDMY(todayStr)})`
+              : (overnightStayCount > 0 ? `Night Stay (${formatISTDateDMY(yesterdayStr)})` : `No Approved List`)),
+        isNightCarryover: isCurrentlyDinner || (isTodayDraftOrEmpty && overnightStayCount > 0),
+        isFutureScheduled: isCurrentlyDinner,
+        lastTime: isCurrentlyDinner ? null : lastTokenTime.LUNCH,
+      },
+      DINNER: {
+        id: 'DINNER',
+        name: 'Dinner',
+        icon: '🌙',
+        timing: '07:30 PM – 10:30 PM IST',
+        targetDate: dinnerTargetDate,
+        dateFormatted: formatISTDateDMY(dinnerTargetDate),
+        dayBadge: 'Tonight',
+        status: isCurrentlyDinner ? 'ACTIVE' : 'UPCOMING',
+        statusLabel: isCurrentlyDinner ? 'Active Now' : 'Opens Tonight 07:30 PM',
+        approved: dinnerApproved,
+        issued: mealSessionCounts.DINNER,
+        pending: Math.max(0, dinnerApproved - mealSessionCounts.DINNER),
+        turnout: dinnerApproved > 0 ? Math.min(100, Math.round((mealSessionCounts.DINNER / dinnerApproved) * 100)) : 0,
+        cycleLabel: dinnerApproved > 0
+          ? `Approved List (${formatISTDateDMY(todayStr)})`
+          : `New List Required (${formatISTDateDMY(todayStr)})`,
+        isNightCarryover: false,
+        isFutureScheduled: false,
+        lastTime: lastTokenTime.DINNER,
+      },
+    };
+  }, [currentSession, breakfastApproved, lunchApproved, dinnerApproved, mealSessionCounts, rawEligibleCount, overnightStayCount, todayStr, yesterdayStr, tomorrowStr, lastTokenTime]);
+
   // Active Session Stats
   const activeSessionTokensCount = mealSessionCounts[currentSession] || 0;
   const activeSessionTurnout = eligibleCount > 0 ? Math.min(100, Math.round((activeSessionTokensCount / eligibleCount) * 100)) : 0;
 
-  // Project distribution
+  // Project distribution with meal breakdown
   const projectStats = useMemo(() => {
     return projectRegistry.map(proj => {
       const eligibleInProj = (todayList?.entries ?? []).filter(e => e.projectCode === proj.code || e.projectName === proj.name).length;
       const tokensInProj = tokensList.filter(t => t.project === proj.name || t.project === proj.code);
+      const breakfastTokens = tokensInProj.filter(t => getTokenEffectiveSession(t) === 'BREAKFAST').length;
+      const lunchTokens = tokensInProj.filter(t => getTokenEffectiveSession(t) === 'LUNCH').length;
+      const dinnerTokens = tokensInProj.filter(t => getTokenEffectiveSession(t) === 'DINNER').length;
       const activeSessionTokensInProj = tokensInProj.filter(t => getTokenEffectiveSession(t) === currentSession).length;
       return {
         project: proj,
         eligible: eligibleInProj,
         activeSessionTokens: activeSessionTokensInProj,
         totalTokensIssued: tokensInProj.length,
+        breakfastTokens,
+        lunchTokens,
+        dinnerTokens,
       };
     });
   }, [todayList, tokensList, projectRegistry, currentSession]);
@@ -175,8 +317,15 @@ export default function Dashboard() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-slate-800">Dashboard</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Overview of incubation students and today's food activity</p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-900">Incubation Food Operations Dashboard</h2>
+            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-[11px] font-bold rounded-full uppercase tracking-wider">
+              Live IST
+            </span>
+          </div>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Real-time meal issuance, overnight night-stay tracking, and institutional attendance
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -207,6 +356,45 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Date & Overnight Cycle Live Status Banner */}
+      <div className="bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-900/60 rounded-2xl p-4 text-white shadow-md">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-lg shadow-inner">
+              📅
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-base text-slate-100">{formattedDateStr}</h3>
+                <span className="text-[11px] font-mono text-indigo-300 bg-indigo-900/80 px-2 py-0.5 rounded border border-indigo-700/50">
+                  {formatISTDateDMY(todayStr)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-300">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Active Window: {currentSession} ({sessionConfig[currentSession]?.timing})
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center gap-2">
+              <span className="text-amber-400 text-sm">🌙</span>
+              <div>
+                <span className="text-slate-400 text-[10px] block uppercase tracking-wider font-semibold">Overnight Stay Protocol (Option A)</span>
+                <span className="text-slate-200 font-medium text-[11px]">
+                  {currentSession === 'DINNER'
+                    ? `Dinner tonight (${formatISTDateDMY(todayStr)}) carries over to tomorrow's Breakfast & Lunch (${formatISTDateDMY(tomorrowStr)})`
+                    : `Active cycle resolves from ${formatISTDateDMY(yesterdayStr)} Night-Stay list`}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 1. Primary KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Metric 1: Eligible Students */}
@@ -219,11 +407,23 @@ export default function Dashboard() {
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-3xl font-bold text-slate-900">{eligibleCount}</span>
-            <span className="text-xs text-slate-500">students approved</span>
+            <span className="text-xs text-slate-500">
+              {isCarriedOver ? 'night stay approved' : 'students approved'}
+            </span>
           </div>
+          {isCarriedOver ? (
+            <div className="mt-2 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5 font-medium flex items-center gap-1">
+              <span>🌙</span>
+              <span>Overnight Stay cycle for {currentSession}</span>
+            </div>
+          ) : (
+            <div className="mt-2 text-[10px] text-slate-400 font-medium">
+              Daily Master List for {formatISTDateDMY(todayStr)}
+            </div>
+          )}
         </div>
 
-        {/* Metric 2: Active Session Turnout (Replaces misleading 167%) */}
+        {/* Metric 2: Active Session Turnout */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-indigo-200 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Active Session ({currentSession})</span>
@@ -270,125 +470,151 @@ export default function Dashboard() {
       </div>
 
       {/* 2. DEDICATED MEAL-WISE TOKEN BREAKDOWN PANEL */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
-        <div className="flex items-center justify-between">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <div>
-            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+            <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
-              Meal-Wise Token Breakdown
+              Detailed Meal Session Breakdown
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">Live turnout statistics across Breakfast, Lunch & Dinner sessions</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Specific meal schedules, eligibility cycle origins, and live turnout metrics
+            </p>
           </div>
-          <span className="px-3 py-1 bg-indigo-50 border border-indigo-100 text-indigo-800 text-xs font-bold rounded-full uppercase">
-            Active Session: {currentSession}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold rounded-lg uppercase tracking-wide flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
+              Current Window: {currentSession}
+            </span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-          {/* Breakfast Session Card */}
-          <div className={`p-4 rounded-xl border transition-all ${
-            currentSession === 'BREAKFAST'
-              ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400/20'
-              : 'bg-slate-50/80 border-slate-200'
-          }`}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🌅</span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Breakfast</span>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                currentSession === 'BREAKFAST' ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-700'
-              }`}>
-                {currentSession === 'BREAKFAST' ? 'Active' : 'Morning'}
-              </span>
-            </div>
-            <div className="mt-2 flex items-baseline justify-between">
-              <span className="text-2xl font-black text-slate-900">{mealSessionCounts.BREAKFAST} <span className="text-xs font-normal text-slate-500">/ {eligibleCount}</span></span>
-              <span className="text-xs font-bold text-slate-700">
-                {eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.BREAKFAST / eligibleCount) * 100)) : 0}% Turnout
-              </span>
-            </div>
-            <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
-              <div
-                className="bg-amber-500 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.BREAKFAST / eligibleCount) * 100)) : 0}%` }}
-              />
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
-              <span>{mealSessionCounts.BREAKFAST} tokens issued</span>
-              <span>{Math.max(0, eligibleCount - mealSessionCounts.BREAKFAST)} pending</span>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {Object.values(sessionConfig).map(meal => {
+            const isCurrent = meal.status === 'ACTIVE';
+            const isCompleted = meal.status === 'COMPLETED';
 
-          {/* Lunch Session Card */}
-          <div className={`p-4 rounded-xl border transition-all ${
-            currentSession === 'LUNCH'
-              ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400/20'
-              : 'bg-slate-50/80 border-slate-200'
-          }`}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">☀️</span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Lunch</span>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                currentSession === 'LUNCH' ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-700'
-              }`}>
-                {currentSession === 'LUNCH' ? 'Active' : 'Afternoon'}
-              </span>
-            </div>
-            <div className="mt-2 flex items-baseline justify-between">
-              <span className="text-2xl font-black text-slate-900">{mealSessionCounts.LUNCH} <span className="text-xs font-normal text-slate-500">/ {eligibleCount}</span></span>
-              <span className="text-xs font-bold text-emerald-700">
-                {eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.LUNCH / eligibleCount) * 100)) : 0}% Turnout
-              </span>
-            </div>
-            <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
-              <div
-                className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.LUNCH / eligibleCount) * 100)) : 0}%` }}
-              />
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
-              <span>{mealSessionCounts.LUNCH} tokens issued</span>
-              <span>{Math.max(0, eligibleCount - mealSessionCounts.LUNCH)} pending</span>
-            </div>
-          </div>
+            const cardBorder = isCurrent
+              ? (meal.id === 'BREAKFAST'
+                  ? 'border-amber-400/80 bg-linear-to-b from-amber-50/70 to-white ring-2 ring-amber-400/20'
+                  : meal.id === 'LUNCH'
+                    ? 'border-emerald-400/80 bg-linear-to-b from-emerald-50/70 to-white ring-2 ring-emerald-400/20'
+                    : 'border-indigo-400/80 bg-linear-to-b from-indigo-50/70 to-white ring-2 ring-indigo-400/20')
+              : 'border-slate-200 bg-white hover:border-slate-300';
 
-          {/* Dinner Session Card */}
-          <div className={`p-4 rounded-xl border transition-all ${
-            currentSession === 'DINNER'
-              ? 'bg-indigo-50/80 border-indigo-300 ring-2 ring-indigo-400/20'
-              : 'bg-slate-50/80 border-slate-200'
-          }`}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🌙</span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Dinner</span>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                currentSession === 'DINNER' ? 'bg-indigo-200 text-indigo-900' : 'bg-slate-200 text-slate-700'
-              }`}>
-                {currentSession === 'DINNER' ? 'Active' : 'Evening'}
-              </span>
-            </div>
-            <div className="mt-2 flex items-baseline justify-between">
-              <span className="text-2xl font-black text-slate-900">{mealSessionCounts.DINNER} <span className="text-xs font-normal text-slate-500">/ {eligibleCount}</span></span>
-              <span className="text-xs font-bold text-indigo-700">
-                {eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.DINNER / eligibleCount) * 100)) : 0}% Turnout
-              </span>
-            </div>
-            <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
+            const progressColor = meal.id === 'BREAKFAST'
+              ? 'bg-amber-500'
+              : meal.id === 'LUNCH'
+                ? 'bg-emerald-600'
+                : 'bg-indigo-600';
+
+            return (
               <div
-                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${eligibleCount > 0 ? Math.min(100, Math.round((mealSessionCounts.DINNER / eligibleCount) * 100)) : 0}%` }}
-              />
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 flex justify-between">
-              <span>{mealSessionCounts.DINNER} tokens issued</span>
-              <span>{Math.max(0, eligibleCount - mealSessionCounts.DINNER)} pending</span>
-            </div>
-          </div>
+                key={meal.id}
+                className={`p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between shadow-xs ${cardBorder}`}
+              >
+                <div>
+                  {/* Top Bar: Icon, Name, Day Badge, and Status Badge */}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-2xl shrink-0">{meal.icon}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="font-bold text-slate-900 text-base tracking-tight">{meal.name}</h4>
+                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/60 px-1.5 py-0.5 rounded whitespace-nowrap">
+                          {meal.dayBadge}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {isCurrent ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-900 border border-emerald-300 animate-pulse whitespace-nowrap">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                          Active
+                        </span>
+                      ) : isCompleted ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">
+                          ✓ Completed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
+                          ⏳ {meal.statusLabel || 'Upcoming'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Dedicated Full Date & Meal Timing Row (Never Broken / Never Wrapped) */}
+                  <div className="flex items-center gap-2 text-xs text-slate-600 font-mono mb-3 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
+                    <span className="font-bold text-slate-800 whitespace-nowrap">{meal.dateFormatted}</span>
+                    <span className="text-slate-300">·</span>
+                    <span className="text-[11px] text-slate-500 whitespace-nowrap">{meal.timing}</span>
+                  </div>
+
+                  {/* Specific Day Cycle Origin Pill (Full Date Displayed - Never Truncated) */}
+                  <div className="mb-3.5">
+                    <div className={`px-2.5 py-1.5 rounded-lg text-[11px] border font-medium flex items-center justify-between gap-2 ${
+                      meal.isNightCarryover
+                        ? 'bg-indigo-50/80 border-indigo-200 text-indigo-900'
+                        : meal.approved > 0
+                          ? 'bg-slate-50 border-slate-200 text-slate-700'
+                          : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="shrink-0">{meal.isNightCarryover ? '🌙' : '📋'}</span>
+                        <span className="font-semibold text-slate-700 whitespace-nowrap">
+                          {meal.cycleLabel}
+                        </span>
+                      </div>
+                      <span className="font-bold font-mono text-[10px] uppercase shrink-0 px-1.5 py-0.5 bg-white/90 rounded border border-slate-200/80 whitespace-nowrap">
+                        {meal.approved} Approved
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Big Turnout Numbers */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-baseline justify-between">
+                      <div className="flex items-baseline gap-1.5">
+                        {meal.isFutureScheduled ? (
+                          <>
+                            <span className="text-3xl font-black text-slate-900 tabular-nums">{meal.approved}</span>
+                            <span className="text-xs text-slate-500 font-medium">scheduled</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-3xl font-black text-slate-900 tabular-nums">{meal.issued}</span>
+                            <span className="text-xs text-slate-500 font-medium">/ {meal.approved} served</span>
+                          </>
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-slate-700 tabular-nums">
+                        {meal.isFutureScheduled ? 'Scheduled for Tomorrow' : `${meal.turnout}% Turnout`}
+                      </span>
+                    </div>
+
+                    {/* Turnout Progress Bar */}
+                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                      <div
+                        className={`${progressColor} h-2 rounded-full transition-all duration-500 ${meal.isFutureScheduled ? 'opacity-30' : ''}`}
+                        style={{ width: meal.isFutureScheduled ? '100%' : `${meal.turnout}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Metrics: Pending + Last Issued Timestamp */}
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                  <span className={`font-semibold ${meal.isFutureScheduled ? 'text-indigo-700' : (meal.pending > 0 ? 'text-amber-700' : 'text-emerald-700')}`}>
+                    {meal.isFutureScheduled ? `${meal.approved} eligible for tomorrow` : (meal.pending > 0 ? `${meal.pending} unclaimed` : 'All cleared ✓')}
+                  </span>
+                  <span className="text-slate-400 font-mono text-[10px]">
+                    {meal.lastTime ? `Last: ${formatISTTime(meal.lastTime)}` : (meal.isFutureScheduled ? 'Opens tomorrow' : 'No tokens yet')}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -403,7 +629,7 @@ export default function Dashboard() {
                 <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
                 Daily Service Lifecycle
               </h3>
-              <span className="text-xs text-slate-400 font-mono">{todayStr}</span>
+              <span className="text-xs text-slate-400 font-mono">{formatISTDateDMY(todayStr)}</span>
             </div>
 
             <div className="space-y-3.5">
@@ -441,25 +667,29 @@ export default function Dashboard() {
             </div>
 
             <div className="space-y-3">
-              {projectStats.map(({ project, eligible, activeSessionTokens, totalTokensIssued }) => {
+              {projectStats.map(({ project, eligible, activeSessionTokens, totalTokensIssued, breakfastTokens, lunchTokens, dinnerTokens }) => {
                 const projectTurnout = eligible > 0 ? Math.min(100, Math.round((activeSessionTokens / eligible) * 100)) : 0;
                 return (
-                  <div key={project.code} className="space-y-1">
+                  <div key={project.code} className="space-y-1.5 p-2 rounded-lg bg-slate-50/60 border border-slate-100">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-slate-800">{project.name}</span>
-                      <span className="text-slate-500 text-[11px]">
+                      <span className="font-semibold text-slate-800">{project.name}</span>
+                      <span className="text-slate-500 text-[11px] font-mono">
                         {activeSessionTokens} / {eligible} served for {currentSession}
                       </span>
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                       <div
                         className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
                         style={{ width: `${projectTurnout}%` }}
-                      ></div>
+                      />
                     </div>
-                    <div className="flex justify-between text-[10px] text-slate-400 pt-0.5">
-                      <span>{eligible} approved students</span>
-                      <span>{totalTokensIssued} total meal tokens</span>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                      <div className="flex items-center gap-1.5 font-medium">
+                        <span className="bg-amber-100/70 text-amber-900 px-1.5 py-0.5 rounded border border-amber-200/60">🌅 {breakfastTokens} B</span>
+                        <span className="bg-emerald-100/70 text-emerald-900 px-1.5 py-0.5 rounded border border-emerald-200/60">☀️ {lunchTokens} L</span>
+                        <span className="bg-indigo-100/70 text-indigo-900 px-1.5 py-0.5 rounded border border-indigo-200/60">🌙 {dinnerTokens} D</span>
+                      </div>
+                      <span className="font-mono text-slate-500 font-semibold">{totalTokensIssued} total</span>
                     </div>
                   </div>
                 );
@@ -553,7 +783,7 @@ export default function Dashboard() {
                           </td>
                           <td className="py-3 pr-3 text-slate-600">
                             <div className="font-semibold text-[11px] text-indigo-900">{sessionLabel}</div>
-                            <div className="text-slate-400 text-[10px]">{token.time}</div>
+                            <div className="text-slate-400 text-[10px]">{formatISTTime(token.issuedAt || token.time)}</div>
                           </td>
                           <td className="py-3 pr-3">
                             <Badge status={token.status} />

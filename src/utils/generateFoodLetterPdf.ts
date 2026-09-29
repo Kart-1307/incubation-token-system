@@ -17,6 +17,7 @@ export interface EditableLetterContent {
   recipientLocation?: string;
   subject?: string;
   salutation?: string;
+  involvedProjects?: string;
   bodyText?: string;
   signOffText?: string;
   page2Title?: string;
@@ -46,11 +47,11 @@ export function generateFoodRequestLetterPdf(
   const finalFromLocation = customLetter?.fromLocation?.trim() || 'Chennai – 44';
   const finalRecipientTitle = customLetter?.recipientTitle?.trim() || 'The Principal';
   const finalRecipientCollege = customLetter?.recipientCollege?.trim() || 'Sri Sai Ram Engineering College';
-  const finalRecipientLocation = customLetter?.recipientLocation?.trim() || 'Chennai – 44';
+  const finalRecipientLocation = customLetter?.recipientLocation?.trim() || 'Chennai -44';
   const finalSubject = customLetter?.subject?.trim() || `sub: Request for Night stay in Incubation on ${finalDate}`;
   const finalSalutation = customLetter?.salutation?.trim() || 'Respected Sir,';
-  const projectsList = projectsText || '__________________________________';
-  const defaultBody = `Our Incubation teams has involved in ${projectsList}. So, I request you to give permission for night stay on ${finalDate}. I also request you to provide food tokens. The student's list is attached with this letter.`;
+  const projectsList = customLetter?.involvedProjects?.trim() || projectsText?.trim() || '__________________________________';
+  const defaultBody = `Our Incubation teams has involved in ${projectsList}, So, i request you to give permission for night stay on ${finalDate}. I also request you to provide food tokens. The student's list is attached with this letter.`;
   const finalBodyText = customLetter?.bodyText?.trim() || defaultBody;
   const finalSignOff = customLetter?.signOffText?.trim() || 'Yours Truly,';
   const finalPage2Title = customLetter?.page2Title?.trim() || 'List of Students Requiring Food Arrangement';

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { getMealSession } from '@/utils/timeUtils';
+import { getMealSession, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 
 export interface TokenPrintData {
   tokenNumber: string;
@@ -72,7 +72,7 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
         </div>
         <div className="flex justify-between">
           <span className="font-semibold text-slate-600">DATE & TIME:</span>
-          <span>{token.date} · {token.time}</span>
+          <span>{formatISTDateDMY(token.date)} · {formatISTTime(token.time)}</span>
         </div>
       </div>
 

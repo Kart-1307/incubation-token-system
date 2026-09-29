@@ -18,7 +18,7 @@ import {
 } from '@/actions/foodListActions';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
-import { getTodayISTDateString } from '@/utils/timeUtils';
+import { getTodayISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 
 type ActiveTab = 'list' | 'tokens' | 'logs';
 
@@ -838,7 +838,7 @@ function DailyFoodListContent() {
             <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-800">
                 {filteredTokens.length} Token{filteredTokens.length !== 1 ? 's' : ''} Generated
-                {tokenDateFilter ? ` for ${tokenDateFilter}` : ' (All Dates)'}
+                {tokenDateFilter ? ` for ${formatISTDateDMY(tokenDateFilter)}` : ' (All Dates)'}
               </h3>
               <span className="text-xs text-slate-400">
                 Sorted by most recent issue time
@@ -903,14 +903,16 @@ function DailyFoodListContent() {
                               className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase ${
                                 (t.session || '').toLowerCase().includes('breakfast')
                                   ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-emerald-100 text-emerald-800'
+                                  : (t.session || '').toLowerCase().includes('lunch')
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-indigo-100 text-indigo-800'
                               }`}
                             >
                               {t.session}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-xs text-slate-500">
-                            {t.date} · {t.time}
+                            {formatISTDateDMY(t.date)} · {formatISTTime(t.issuedAt || t.time)}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -1035,7 +1037,7 @@ function DailyFoodListContent() {
                     {datewiseLogs.map((log, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                         <td className="px-4 py-3 font-semibold text-slate-900 text-sm">
-                          {log.date}
+                          {formatISTDateDMY(log.date)}
                           {log.date === todayStr && (
                             <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
                               Today
@@ -1373,6 +1375,13 @@ function DailyFoodListContent() {
         isOpen={showLetterModal}
         onClose={() => setShowLetterModal(false)}
         foodDate={selectedDate}
+        projectsList={Array.from(
+          new Set(
+            (currentList?.entries ?? [])
+              .map(entry => entry.projectName || entry.projectCode)
+              .filter(Boolean)
+          )
+        )}
         studentsList={(currentList?.entries ?? []).map(entry => ({
           studentId: entry.studentId,
           name: entry.studentName,

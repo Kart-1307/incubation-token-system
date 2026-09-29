@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import TokenPrintSlip from '@/components/TokenPrintSlip';
 import { verifyStudentScan, issueFoodToken, type VerificationResult } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
-import { getMealSession, getTodayISTDateString } from '@/utils/timeUtils';
+import { getMealSession, getTodayISTDateString, getPreviousISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 import { getStudents, type StudentRecord } from '@/actions/studentActions';
 import QRCode from 'qrcode';
 
@@ -40,6 +40,7 @@ export default function ScanToken() {
   const [generatedToken, setGeneratedToken] = useState<TokenDisplay | null>(null);
   const [todayStr] = useState<string>(() => getTodayISTDateString());
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
+  const [yesterdayFoodListInfo, setYesterdayFoodListInfo] = useState<FoodListDetails | null>(null);
   const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
   const [liveSyncConnected, setLiveSyncConnected] = useState<boolean>(false);
   const [showPhoneQrModal, setShowPhoneQrModal] = useState<boolean>(false);
@@ -189,7 +190,9 @@ export default function ScanToken() {
   };
 
   useEffect(() => {
+    const yesterdayStr = getPreviousISTDateString(todayStr);
     getDailyFoodList(todayStr).then(res => setFoodListInfo(res)).catch(() => {});
+    getDailyFoodList(yesterdayStr).then(res => setYesterdayFoodListInfo(res)).catch(() => {});
     getStudents().then(res => setDbStudents(res)).catch(() => {});
   }, [todayStr]);
 
@@ -220,7 +223,7 @@ export default function ScanToken() {
               studentName: payload.studentName || 'Student',
               project: payload.project || 'Incubation Member',
               date: payload.date || todayStr,
-              time: payload.time || 'Now',
+              time: formatISTTime(payload.time || payload.timestamp),
               session: payload.session || getMealSession(),
               status: 'Issued',
             });
@@ -254,7 +257,7 @@ export default function ScanToken() {
               studentName: payload.studentName || 'Student',
               project: payload.project || 'Incubation Member',
               date: payload.date || todayStr,
-              time: payload.time || 'Earlier',
+              time: formatISTTime(payload.time || payload.timestamp),
               session: payload.session || getMealSession(),
               status: 'Issued',
             });
@@ -297,6 +300,9 @@ export default function ScanToken() {
 
 
 
+  const currentMealSession = getMealSession();
+  const activeTerminalDate = todayStr;
+
   const processIdVerification = async (targetId: string) => {
     const cleanId = targetId.trim().toUpperCase();
     if (!cleanId) return;
@@ -327,7 +333,7 @@ export default function ScanToken() {
         project: res.project || 'Unassigned',
         date: res.existingToken.date,
         time: res.existingToken.time,
-        session: res.existingToken.session || getMealSession(),
+        session: res.existingToken.session || currentMealSession,
         status: 'Issued',
       });
       setState('duplicate');
@@ -356,7 +362,7 @@ export default function ScanToken() {
     if (!student) return;
     setState('generating');
 
-    const res = await issueFoodToken(student.id);
+    const res = await issueFoodToken(student.id, undefined, todayStr);
 
     if (!res.success || !res.token) {
       if (res.message?.includes('already issued') || res.message?.includes('already generated')) {
@@ -378,7 +384,7 @@ export default function ScanToken() {
       project: t.project,
       date: t.date,
       time: t.time,
-      session: t.session || getMealSession(),
+      session: t.session || currentMealSession,
       status: t.status,
     });
 
@@ -394,8 +400,6 @@ export default function ScanToken() {
     setGeneratedToken(null);
     setTimeout(() => inputRef.current?.focus(), 100);
   };
-
-  const currentMealSession = getMealSession();
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -439,17 +443,28 @@ export default function ScanToken() {
       </div>
 
       {/* Food List Status Banner */}
-      {foodListInfo && (
-        <div className="p-3.5 rounded-xl border text-xs flex items-center justify-between font-medium bg-emerald-50 border-emerald-200 text-emerald-800 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Daily Food Eligibility List ({todayStr}): <strong className="text-emerald-950 font-bold">{foodListInfo.entries.length} students approved</strong></span>
-          </div>
+      <div className="p-3.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 font-medium bg-emerald-50 border-emerald-200 text-emerald-800 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          {foodListInfo && foodListInfo.entries.length > 0 ? (
+            <span>Daily Food Eligibility List ({formatISTDateDMY(activeTerminalDate)}): <strong className="text-emerald-950 font-bold">{foodListInfo.entries.length} students approved</strong></span>
+          ) : (currentMealSession === 'BREAKFAST' || currentMealSession === 'LUNCH') && yesterdayFoodListInfo && yesterdayFoodListInfo.entries.length > 0 ? (
+            <span>Overnight Night-Stay Cycle ({formatISTDateDMY(getPreviousISTDateString(activeTerminalDate))}): <strong className="text-emerald-950 font-bold">{yesterdayFoodListInfo.entries.length} students approved</strong> for {currentMealSession}</span>
+          ) : (
+            <span>Daily Food Eligibility List ({formatISTDateDMY(activeTerminalDate)}): <strong className="text-amber-800 font-bold">0 approved today</strong></span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {(currentMealSession === 'BREAKFAST' || currentMealSession === 'LUNCH') && yesterdayFoodListInfo && yesterdayFoodListInfo.entries.length > 0 && foodListInfo && foodListInfo.entries.length > 0 && (
+            <span className="text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold border border-emerald-300">
+              +{yesterdayFoodListInfo.entries.length} Night Stay
+            </span>
+          )}
           <div className="px-2.5 py-1 rounded bg-indigo-100 text-indigo-800 font-bold text-[11px] uppercase tracking-wide">
             Active Session: {currentMealSession}
           </div>
         </div>
-      )}
+      </div>
 
       {/* UNIFIED BARCODE & MANUAL ENTRY TERMINAL */}
       {state === 'idle' && (
@@ -607,18 +622,37 @@ export default function ScanToken() {
               <div className="text-xs text-slate-500 italic py-1">No registered students found in database</div>
             ) : (
               <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
-                {dbStudents.map(studentItem => (
-                  <button
-                    key={studentItem.id}
-                    type="button"
-                    onClick={() => handleQuickTapScan(studentItem.id)}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-indigo-900 border border-slate-700 text-xs font-mono font-semibold text-indigo-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
-                    title={`${studentItem.name} (${studentItem.department})`}
-                  >
-                    <span>Tap {studentItem.id}</span>
-                    <span className="text-[10px] font-sans text-slate-400 font-normal">({studentItem.name.split(' ')[0]})</span>
-                  </button>
-                ))}
+                {dbStudents.map(studentItem => {
+                  const isEligibleToday = (foodListInfo?.entries || []).some(e => e.studentId === studentItem.id);
+                  const isEligibleNightStay = (currentMealSession === 'BREAKFAST' || currentMealSession === 'LUNCH') &&
+                    (yesterdayFoodListInfo?.entries || []).some(e => e.studentId === studentItem.id);
+                  const isApproved = isEligibleToday || isEligibleNightStay;
+
+                  return (
+                    <button
+                      key={studentItem.id}
+                      type="button"
+                      onClick={() => handleQuickTapScan(studentItem.id)}
+                      className={`px-3 py-1.5 border text-xs font-mono font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        isApproved
+                          ? 'bg-slate-800 hover:bg-emerald-950/80 border-emerald-500/60 text-emerald-300'
+                          : 'bg-slate-800 hover:bg-indigo-900 border-slate-700 text-slate-300'
+                      }`}
+                      title={`${studentItem.name} (${studentItem.department}) - ${
+                        isApproved
+                          ? (isEligibleNightStay && !isEligibleToday ? 'Overnight Stay Approved' : 'Approved Today')
+                          : 'Not on food list'
+                      }`}
+                    >
+                      {isApproved && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                      <span>Tap {studentItem.id}</span>
+                      <span className="text-[10px] font-sans text-slate-400 font-normal">({studentItem.name.split(' ')[0]})</span>
+                      {isEligibleNightStay && !isEligibleToday && (
+                        <span className="text-[9px] bg-indigo-950 text-indigo-300 px-1 py-0.2 rounded border border-indigo-700/60">🌙 Night</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -799,7 +833,7 @@ export default function ScanToken() {
               {generatedToken.tokenNumber}
             </div>
             <div className="text-xs font-medium text-slate-500 mt-1">
-              Issued at: <span className="font-bold text-slate-800">{generatedToken.time}</span> · Session: <span className="font-bold text-indigo-900 uppercase">{generatedToken.session || currentMealSession}</span>
+              Issued at: <span className="font-bold text-slate-800">{formatISTTime(generatedToken.time)}</span> · Session: <span className="font-bold text-indigo-900 uppercase">{generatedToken.session || currentMealSession}</span>
             </div>
           </div>
 
@@ -839,7 +873,7 @@ export default function ScanToken() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">ISSUED:</span>
-                  <span>{generatedToken.time}</span>
+                  <span>{formatISTTime(generatedToken.time)}</span>
                 </div>
               </div>
 
@@ -880,7 +914,7 @@ export default function ScanToken() {
             <div className="font-bold text-slate-800">{student.name}</div>
             <div className="text-sm text-slate-400 font-medium font-mono">{student.id} · {student.department}</div>
             <p className="text-sm text-slate-500">
-              This student is not included in today's food eligibility list ({todayStr}). No food token was issued.
+              This student is not included in today's food eligibility list ({formatISTDateDMY(todayStr)}). No food token was issued.
             </p>
             <button
               onClick={reset}
@@ -947,7 +981,7 @@ export default function ScanToken() {
                 <div>
                   <div className="text-xs text-slate-500 font-semibold mb-0.5">Existing Token Record</div>
                   <div className="font-bold text-indigo-900 text-base font-mono tabular-nums">{generatedToken.tokenNumber}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">Issued: {generatedToken.time} ({generatedToken.date})</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Issued: {formatISTTime(generatedToken.time)} ({formatISTDateDMY(generatedToken.date)})</div>
                 </div>
               </div>
             )}

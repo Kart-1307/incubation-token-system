@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
-import { getTodayISTDateString, formatISTTime, getTokenEffectiveSession } from '@/utils/timeUtils';
+import { getTodayISTDateString, formatISTTime, getTokenEffectiveSession, getMealSession, getPreviousISTDateString } from '@/utils/timeUtils';
 
 export interface StudentRecord {
   id: string;
@@ -289,11 +289,22 @@ export async function getDashboardStats(dateInput?: string) {
         }),
       ]);
 
+      const session = getMealSession();
+      const yesterdayStr = getPreviousISTDateString(date);
+      let overnightStayCount = 0;
+      if (session === 'BREAKFAST' || session === 'LUNCH') {
+        overnightStayCount = await prisma.dailyFoodEligibility.count({
+          where: { date: yesterdayStr },
+        });
+      }
+
       return {
         date,
         listStatus: foodList?.status || 'Draft',
         finalizedBy: foodList?.finalizedBy || null,
-        eligibleCount: eligibilities.length,
+        eligibleCount: eligibilities.length > 0 ? eligibilities.length : overnightStayCount,
+        todayEligibleCount: eligibilities.length,
+        overnightStayCount,
         tokensGeneratedCount: tokens.length,
         totalStudents: students.length,
         activeStudents: students.filter((s: any) => s.status === 'Active').length,
@@ -376,6 +387,7 @@ export interface DashboardBundleData {
   tokens: any[];
   students: StudentRecord[];
   projects: ProjectRecord[];
+  overnightStayCount?: number;
 }
 
 export async function getDashboardBundle(dateInput?: string): Promise<DashboardBundleData> {
@@ -407,6 +419,15 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
           },
         }),
       ]);
+
+      const session = getMealSession();
+      const yesterdayStr = getPreviousISTDateString(date);
+      let overnightStayCount = 0;
+      if (session === 'BREAKFAST' || session === 'LUNCH') {
+        overnightStayCount = await prisma.dailyFoodEligibility.count({
+          where: { date: yesterdayStr },
+        });
+      }
 
       const entries = eligibilities.map((e: any) => ({
         studentId: e.studentId,
@@ -479,6 +500,7 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
         tokens,
         students: formattedStudents,
         projects: formattedProjects,
+        overnightStayCount,
       };
     } catch (err) {
       console.error('getDashboardBundle error:', err);
@@ -487,6 +509,7 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
         tokens: [],
         students: [],
         projects: [],
+        overnightStayCount: 0,
       };
     }
   }, ['dashboard', 'foodlist', 'foodtokens', 'students', 'projects']);

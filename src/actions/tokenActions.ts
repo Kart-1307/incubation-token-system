@@ -2,7 +2,7 @@
 
 import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
-import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession, getTodayISTDateString, formatISTTime } from '@/utils/timeUtils';
+import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession, getTodayISTDateString, formatISTTime, getPreviousISTDateString } from '@/utils/timeUtils';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
 import { revalidatePath } from 'next/cache';
 
@@ -62,7 +62,11 @@ export interface VerificationResult {
   message: string;
 }
 
-export async function verifyStudentScan(studentIdInput: string, targetDate?: string): Promise<VerificationResult> {
+export async function verifyStudentScan(
+  studentIdInput: string,
+  targetDate?: string,
+  sessionOverride?: 'BREAKFAST' | 'LUNCH' | 'DINNER'
+): Promise<VerificationResult> {
   const studentId = (studentIdInput || '').trim().toUpperCase();
   const date = targetDate || getTodayISTDateString();
 
@@ -90,8 +94,12 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
       };
     }
 
+    const currentSession = sessionOverride || getMealSession();
+    const yesterdayStr = getPreviousISTDateString(date);
+
     // 2. Check if student is in eligibility list for the date
-    const eligibility = await prisma.dailyFoodEligibility.findUnique({
+    // Check target date (today) first
+    let eligibility = await prisma.dailyFoodEligibility.findUnique({
       where: {
         date_studentId: {
           date,
@@ -100,6 +108,24 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
       },
       include: { project: true },
     });
+
+    // Option A: If not found on today's list and session is BREAKFAST or LUNCH,
+    // automatically resolve via yesterday's Night Stay list!
+    let isNightStayCycle = false;
+    if (!eligibility && (currentSession === 'BREAKFAST' || currentSession === 'LUNCH')) {
+      eligibility = await prisma.dailyFoodEligibility.findUnique({
+        where: {
+          date_studentId: {
+            date: yesterdayStr,
+            studentId: student.id,
+          },
+        },
+        include: { project: true },
+      });
+      if (eligibility) {
+        isNightStayCycle = true;
+      }
+    }
 
     // Also check if any project membership exists to show project name
     let projectName = eligibility?.project?.name || eligibility?.projectCode;
@@ -114,6 +140,10 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
     }
 
     if (!eligibility) {
+      const notEligibleMsg = currentSession === 'DINNER'
+        ? `Student "${student.name}" (${student.id}) is NOT on the approved Dinner list for ${date}.`
+        : `Student "${student.name}" (${student.id}) is NOT on today's food list (${date}) or yesterday's night stay list (${yesterdayStr}).`;
+
       return {
         found: true,
         student: {
@@ -126,11 +156,9 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
         project: projectName || 'Unassigned',
         isEligible: false,
         isDuplicate: false,
-        message: `Student "${student.name}" (${student.id}) is NOT on the approved food list for ${date}.`,
+        message: notEligibleMsg,
       };
     }
-
-    const currentSession = getMealSession();
 
     // 3. Check if token was already issued for this date AND current session
     const studentTokensToday = await prisma.foodToken.findMany({
@@ -200,9 +228,14 @@ export async function verifyStudentScan(studentIdInput: string, targetDate?: str
   }
 }
 
-export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: string): Promise<IssueTokenResult> {
+export async function issueFoodToken(
+  studentIdInput: string,
+  staffUserIdInput?: string,
+  targetDate?: string,
+  sessionOverride?: 'BREAKFAST' | 'LUNCH' | 'DINNER'
+): Promise<IssueTokenResult> {
   const studentId = studentIdInput.trim().toUpperCase();
-  const todayStr = getTodayISTDateString();
+  const todayStr = targetDate || getTodayISTDateString();
 
   try {
     const validStaffId = await ensureDefaultStaffUser();
@@ -216,8 +249,11 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         return { success: false, notFound: true, message: `Student ID "${studentId}" not found in institutional registry.` };
       }
 
+      const session = sessionOverride || getMealSession();
+      const yesterdayStr = getPreviousISTDateString(todayStr);
+
       // 2. Verify Eligibility in Today's Food List
-      const eligibility = await tx.dailyFoodEligibility.findUnique({
+      let eligibility = await tx.dailyFoodEligibility.findUnique({
         where: {
           date_studentId: {
             date: todayStr,
@@ -227,7 +263,28 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
         include: { project: true },
       });
 
+      // Option A: If not found on today's list, check yesterday's Night Stay list for Breakfast & Lunch
+      let isNightStayCycle = false;
+      if (!eligibility && (session === 'BREAKFAST' || session === 'LUNCH')) {
+        eligibility = await tx.dailyFoodEligibility.findUnique({
+          where: {
+            date_studentId: {
+              date: yesterdayStr,
+              studentId: student.id,
+            },
+          },
+          include: { project: true },
+        });
+        if (eligibility) {
+          isNightStayCycle = true;
+        }
+      }
+
       if (!eligibility) {
+        const notApprovedMsg = session === 'DINNER'
+          ? `Student "${student.name}" (${student.id}) is NOT approved for tonight's food list (${todayStr}).`
+          : `Student "${student.name}" (${student.id}) is NOT approved for today's food list (${todayStr}) or yesterday's night stay list (${yesterdayStr}).`;
+
         return {
           success: false,
           isEligible: false,
@@ -238,11 +295,9 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
             year: student.year,
             status: student.status,
           },
-          message: `Student "${student.name}" (${student.id}) is NOT approved for today's food list (${todayStr}).`,
+          message: notApprovedMsg,
         };
       }
-
-      const session = getMealSession();
 
       // 3. Check for Duplicate Token for current session Today
       const studentTokensToday = await tx.foodToken.findMany({
@@ -337,7 +392,9 @@ export async function issueFoodToken(studentIdInput: string, staffUserIdInput?: 
 
         return {
           success: true,
-          message: `Token ${token.tokenNumber} generated successfully for ${student.name} (${session}).`,
+          message: isNightStayCycle
+            ? `Token ${token.tokenNumber} generated successfully for ${student.name} (${session} - Overnight Stay Cycle).`
+            : `Token ${token.tokenNumber} generated successfully for ${student.name} (${session}).`,
           student: {
             id: student.id,
             name: student.name,
@@ -412,3 +469,27 @@ export async function getFoodTokens(date?: string) {
     }
   }, ['foodtokens']);
 }
+
+export async function resetTestTokens(targetDate?: string, studentIdInput?: string): Promise<{ success: boolean; count: number; message: string }> {
+  try {
+    const whereClause: any = {};
+    if (targetDate) whereClause.date = targetDate;
+    if (studentIdInput) whereClause.studentId = studentIdInput.trim().toUpperCase();
+
+    const deleteRes = await prisma.foodToken.deleteMany({
+      where: whereClause,
+    });
+
+    appCache.invalidateTags(['dashboard', 'foodtokens', 'foodlist']);
+
+    return {
+      success: true,
+      count: deleteRes.count,
+      message: `Deleted ${deleteRes.count} token(s).`,
+    };
+  } catch (error) {
+    console.error('Error resetting test tokens:', error);
+    return { success: false, count: 0, message: 'Failed to reset test tokens.' };
+  }
+}
+

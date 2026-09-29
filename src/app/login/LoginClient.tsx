@@ -10,8 +10,8 @@ export default function LoginClient() {
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
 
   // Sign In State
-  const [username, setUsername] = useState('staff');
-  const [password, setPassword] = useState('Sairam@123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [signInError, setSignInError] = useState('');
   const [signInLoading, setSignInLoading] = useState(false);
 
@@ -141,7 +141,7 @@ export default function LoginClient() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. staff or incubation@sairam.edu.in"
+                  placeholder="Enter username or email"
                   className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   required
                 />
@@ -155,7 +155,7 @@ export default function LoginClient() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Enter password"
                   className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                   required
                 />

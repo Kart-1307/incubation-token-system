@@ -31,7 +31,7 @@ export default function DashboardLayout({
   }, []);
 
   const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
   });
 
   const handleLogout = async () => {
