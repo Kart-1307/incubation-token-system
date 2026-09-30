@@ -160,8 +160,13 @@ function getRealPrisma(): PrismaClient | null {
         // Benign idle connection recycling or transient network jitter handled by resilient proxy
         if (
           msg.includes('10054') ||
+          msg.includes('10053') ||
           msg.includes('ConnectionReset') ||
           msg.includes('forcibly closed') ||
+          msg.includes('closed the connection') ||
+          msg.includes('wsarecv') ||
+          msg.includes('aborted') ||
+          msg.includes('WSAECONNABORTED') ||
           msg.includes("Can't reach database server")
         ) {
           return;
@@ -687,6 +692,9 @@ function isConnectionError(error: any): boolean {
     code === 'P1003' ||
     code === 'P2022' ||
     code === 'P2021' ||
+    code === 'P2024' ||
+    msg.includes('connection pool') ||
+    msg.includes('Timed out fetching a new connection') ||
     msg.includes("Can't reach database") ||
     msg.includes('closed the connection') ||
     msg.includes('ConnectionReset') ||
@@ -732,7 +740,7 @@ function createResilientModelProxy(modelName: string) {
                   console.log(`[Prisma ${modelName}.${method}] ✓ Reconnect successful, query recovered.`);
                   return retryRes;
                 } catch (retryErr: any) {
-                  console.warn(`[Prisma ${modelName}.${method}] Reconnect retry failed, falling back:`, retryErr?.message || retryErr);
+                  console.warn(`[Prisma ${modelName}.${method}] Database transiently unreachable, serving from local store.`);
                 }
               }
             } else {
@@ -778,7 +786,7 @@ export const prisma: any = new Proxy({}, {
                   console.log('[Prisma $transaction] ✓ Reconnect successful, transaction recovered.');
                   return res;
                 } catch (retryErr: any) {
-                  console.warn('[Prisma $transaction] Retry failed, falling back:', retryErr?.message || retryErr);
+                  console.warn('[Prisma $transaction] Database transiently unreachable, serving from local store.');
                 }
               }
             } else {

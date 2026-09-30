@@ -388,6 +388,8 @@ export interface DashboardBundleData {
   students: StudentRecord[];
   projects: ProjectRecord[];
   overnightStayCount?: number;
+  yesterdayDinnerTokensCount?: number;
+  yesterdayLastDinnerTime?: string | null;
 }
 
 export async function getDashboardBundle(dateInput?: string): Promise<DashboardBundleData> {
@@ -423,10 +425,26 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
       const session = getMealSession();
       const yesterdayStr = getPreviousISTDateString(date);
       let overnightStayCount = 0;
+      let yesterdayDinnerTokensCount = 0;
+      let yesterdayLastDinnerTime: string | null = null;
       if (session === 'BREAKFAST' || session === 'LUNCH') {
-        overnightStayCount = await prisma.dailyFoodEligibility.count({
-          where: { date: yesterdayStr },
-        });
+        const [oCount, yTokens] = await Promise.all([
+          prisma.dailyFoodEligibility.count({
+            where: { date: yesterdayStr },
+          }),
+          prisma.foodToken.findMany({
+            where: {
+              date: yesterdayStr,
+              session: { in: ['DINNER', 'Dinner', 'dinner'] },
+            },
+            orderBy: { issuedAt: 'desc' },
+          }),
+        ]);
+        overnightStayCount = oCount;
+        yesterdayDinnerTokensCount = yTokens.length;
+        if (yTokens.length > 0 && yTokens[0].issuedAt) {
+          yesterdayLastDinnerTime = formatISTTime(yTokens[0].issuedAt);
+        }
       }
 
       const entries = eligibilities.map((e: any) => ({
@@ -501,6 +519,8 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
         students: formattedStudents,
         projects: formattedProjects,
         overnightStayCount,
+        yesterdayDinnerTokensCount,
+        yesterdayLastDinnerTime,
       };
     } catch (err) {
       console.error('getDashboardBundle error:', err);
@@ -510,6 +530,8 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
         students: [],
         projects: [],
         overnightStayCount: 0,
+        yesterdayDinnerTokensCount: 0,
+        yesterdayLastDinnerTime: null,
       };
     }
   }, ['dashboard', 'foodlist', 'foodtokens', 'students', 'projects']);

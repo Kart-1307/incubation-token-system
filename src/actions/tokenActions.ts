@@ -2,7 +2,7 @@
 
 import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
-import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession, getTodayISTDateString, formatISTTime, getPreviousISTDateString } from '@/utils/timeUtils';
+import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession, getTodayISTDateString, formatISTTime, formatISTDateDMY, getPreviousISTDateString } from '@/utils/timeUtils';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
 import { revalidatePath } from 'next/cache';
 
@@ -97,35 +97,27 @@ export async function verifyStudentScan(
     const currentSession = sessionOverride || getMealSession();
     const yesterdayStr = getPreviousISTDateString(date);
 
-    // 2. Check if student is in eligibility list for the date
-    // Check target date (today) first
+    // 2. Strict 3-Meal Night-Stay Reference:
+    // List L defines: Meal 1 (Dinner L), Meal 2 (Breakfast L+1), Meal 3 (Lunch L+1).
+    // Therefore:
+    // - BREAKFAST today (Meal 2) MUST reference yesterday's list (yesterdayStr)
+    // - LUNCH today (Meal 3)     MUST reference yesterday's list (yesterdayStr)
+    // - DINNER today (Meal 1)    MUST reference today's list (date)
+    const isMorningOrAfternoon = currentSession === 'BREAKFAST' || currentSession === 'LUNCH';
+    const listToRefer = isMorningOrAfternoon ? yesterdayStr : date;
+
+    // Check student strictly in the referenced list:
     let eligibility = await prisma.dailyFoodEligibility.findUnique({
       where: {
         date_studentId: {
-          date,
+          date: listToRefer,
           studentId: student.id,
         },
       },
       include: { project: true },
     });
 
-    // Option A: If not found on today's list and session is BREAKFAST or LUNCH,
-    // automatically resolve via yesterday's Night Stay list!
-    let isNightStayCycle = false;
-    if (!eligibility && (currentSession === 'BREAKFAST' || currentSession === 'LUNCH')) {
-      eligibility = await prisma.dailyFoodEligibility.findUnique({
-        where: {
-          date_studentId: {
-            date: yesterdayStr,
-            studentId: student.id,
-          },
-        },
-        include: { project: true },
-      });
-      if (eligibility) {
-        isNightStayCycle = true;
-      }
-    }
+    const isNightStayCycle = isMorningOrAfternoon && Boolean(eligibility);
 
     // Also check if any project membership exists to show project name
     let projectName = eligibility?.project?.name || eligibility?.projectCode;
@@ -140,9 +132,38 @@ export async function verifyStudentScan(
     }
 
     if (!eligibility) {
+      // Diagnostic check: check if student is registered for tonight's stay instead
+      if (isMorningOrAfternoon) {
+        const registeredTonight = await prisma.dailyFoodEligibility.findUnique({
+          where: {
+            date_studentId: {
+              date,
+              studentId: student.id,
+            },
+          },
+        });
+
+        if (registeredTonight) {
+          return {
+            found: true,
+            student: {
+              id: student.id,
+              name: student.name,
+              department: student.department,
+              year: student.year,
+              status: student.status,
+            },
+            project: projectName || registeredTonight.projectCode || 'Unassigned',
+            isEligible: false,
+            isDuplicate: false,
+            message: `Student "${student.name}" (${student.id}) is approved on the ${formatISTDateDMY(date)} list (first meal is Dinner tonight at 07:30 PM). They are NOT on the ${formatISTDateDMY(yesterdayStr)} list for today's ${currentSession}.`,
+          };
+        }
+      }
+
       const notEligibleMsg = currentSession === 'DINNER'
-        ? `Student "${student.name}" (${student.id}) is NOT on the approved Dinner list for ${date}.`
-        : `Student "${student.name}" (${student.id}) is NOT on today's food list (${date}) or yesterday's night stay list (${yesterdayStr}).`;
+        ? `Student "${student.name}" (${student.id}) is NOT on the approved Dinner list for ${formatISTDateDMY(date)}.`
+        : `Student "${student.name}" (${student.id}) is NOT on the ${formatISTDateDMY(yesterdayStr)} Night-Stay list for today's ${currentSession}.`;
 
       return {
         found: true,
@@ -252,38 +273,57 @@ export async function issueFoodToken(
       const session = sessionOverride || getMealSession();
       const yesterdayStr = getPreviousISTDateString(todayStr);
 
-      // 2. Verify Eligibility in Today's Food List
+      // Strict 3-Meal Night-Stay Reference:
+      // - BREAKFAST today (Meal 2) MUST reference yesterday's list (yesterdayStr)
+      // - LUNCH today (Meal 3)     MUST reference yesterday's list (yesterdayStr)
+      // - DINNER today (Meal 1)    MUST reference today's list (todayStr)
+      const isMorningOrAfternoon = session === 'BREAKFAST' || session === 'LUNCH';
+      const listToRefer = isMorningOrAfternoon ? yesterdayStr : todayStr;
+
+      // 2. Verify Eligibility strictly in the referenced Food List
       let eligibility = await tx.dailyFoodEligibility.findUnique({
         where: {
           date_studentId: {
-            date: todayStr,
+            date: listToRefer,
             studentId: student.id,
           },
         },
         include: { project: true },
       });
 
-      // Option A: If not found on today's list, check yesterday's Night Stay list for Breakfast & Lunch
-      let isNightStayCycle = false;
-      if (!eligibility && (session === 'BREAKFAST' || session === 'LUNCH')) {
-        eligibility = await tx.dailyFoodEligibility.findUnique({
-          where: {
-            date_studentId: {
-              date: yesterdayStr,
-              studentId: student.id,
-            },
-          },
-          include: { project: true },
-        });
-        if (eligibility) {
-          isNightStayCycle = true;
-        }
-      }
+      const isNightStayCycle = isMorningOrAfternoon && Boolean(eligibility);
 
       if (!eligibility) {
+        // Diagnostic check: check if student is registered for tonight's stay instead
+        if (isMorningOrAfternoon) {
+          const registeredTonight = await tx.dailyFoodEligibility.findUnique({
+            where: {
+              date_studentId: {
+                date: todayStr,
+                studentId: student.id,
+              },
+            },
+          });
+
+          if (registeredTonight) {
+            return {
+              success: false,
+              isEligible: false,
+              student: {
+                id: student.id,
+                name: student.name,
+                department: student.department,
+                year: student.year,
+                status: student.status,
+              },
+              message: `Student "${student.name}" (${student.id}) is approved on the ${formatISTDateDMY(todayStr)} list (first meal is Dinner tonight at 07:30 PM). They are NOT on the ${formatISTDateDMY(yesterdayStr)} list for today's ${session}.`,
+            };
+          }
+        }
+
         const notApprovedMsg = session === 'DINNER'
-          ? `Student "${student.name}" (${student.id}) is NOT approved for tonight's food list (${todayStr}).`
-          : `Student "${student.name}" (${student.id}) is NOT approved for today's food list (${todayStr}) or yesterday's night stay list (${yesterdayStr}).`;
+          ? `Student "${student.name}" (${student.id}) is NOT approved for tonight's food list (${formatISTDateDMY(todayStr)}).`
+          : `Student "${student.name}" (${student.id}) is NOT approved on the ${formatISTDateDMY(yesterdayStr)} Night-Stay list for today's ${session}.`;
 
         return {
           success: false,

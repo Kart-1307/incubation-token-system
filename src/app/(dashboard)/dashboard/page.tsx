@@ -16,6 +16,7 @@ import {
   formatISTDateShort,
   formatISTDateWithDay,
   formatISTTime,
+  type MealSession,
 } from '@/utils/timeUtils';
 
 interface CachedDashboardPayload {
@@ -24,6 +25,9 @@ interface CachedDashboardPayload {
   tokens: any[];
   students: StudentRecord[];
   projects: ProjectRecord[];
+  overnightStayCount?: number;
+  yesterdayDinnerTokensCount?: number;
+  yesterdayLastDinnerTime?: string | null;
   timestamp: number;
 }
 
@@ -43,7 +47,7 @@ function getInitialDashboardData(todayStr: string): CachedDashboardPayload | nul
           return parsed;
         }
       }
-    } catch {}
+    } catch { }
   }
   return null;
 }
@@ -58,7 +62,9 @@ export default function Dashboard() {
   const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
   const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
   const [loading, setLoading] = useState(() => !initialCache);
-  const [overnightStayCount, setOvernightStayCount] = useState<number>(0);
+  const [overnightStayCount, setOvernightStayCount] = useState<number>(() => initialCache?.overnightStayCount ?? 0);
+  const [yesterdayDinnerTokensCount, setYesterdayDinnerTokensCount] = useState<number>(() => initialCache?.yesterdayDinnerTokensCount ?? 0);
+  const [yesterdayLastDinnerTime, setYesterdayLastDinnerTime] = useState<string | null>(() => initialCache?.yesterdayLastDinnerTime ?? null);
 
   const loadData = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -69,6 +75,8 @@ export default function Dashboard() {
       setStudentRegistry(bundle.students);
       setProjectRegistry(bundle.projects);
       setOvernightStayCount(bundle.overnightStayCount || 0);
+      setYesterdayDinnerTokensCount(bundle.yesterdayDinnerTokensCount || 0);
+      setYesterdayLastDinnerTime(bundle.yesterdayLastDinnerTime || null);
 
       const payload: CachedDashboardPayload = {
         date: todayStr,
@@ -76,13 +84,16 @@ export default function Dashboard() {
         tokens: bundle.tokens,
         students: bundle.students,
         projects: bundle.projects,
+        overnightStayCount: bundle.overnightStayCount || 0,
+        yesterdayDinnerTokensCount: bundle.yesterdayDinnerTokensCount || 0,
+        yesterdayLastDinnerTime: bundle.yesterdayLastDinnerTime || null,
         timestamp: Date.now(),
       };
       memoryDashboardCache = payload;
       if (typeof window !== 'undefined') {
         try {
           sessionStorage.setItem('incubation_dashboard_cache', JSON.stringify(payload));
-        } catch {}
+        } catch { }
       }
     } catch (e) {
       console.error('Error loading dashboard:', e);
@@ -111,9 +122,9 @@ export default function Dashboard() {
           if (payload.type === 'TOKEN_ISSUED' || payload.type === 'FOOD_LIST_ADDED') {
             loadData(true);
           }
-        } catch {}
+        } catch { }
       };
-    } catch {}
+    } catch { }
 
     return () => {
       if (eventSource) eventSource.close();
@@ -142,14 +153,9 @@ export default function Dashboard() {
 
   const isBreakfastOrLunch = currentSession === 'BREAKFAST' || currentSession === 'LUNCH';
   const rawEligibleCount = todayList?.entries.length ?? 0;
-  const isCarriedOver = rawEligibleCount === 0 && isBreakfastOrLunch && overnightStayCount > 0;
-  const eligibleCount = rawEligibleCount > 0 ? rawEligibleCount : (isBreakfastOrLunch ? overnightStayCount : 0);
+  const isCarriedOver = isBreakfastOrLunch && overnightStayCount > 0;
+  const eligibleCount = isCarriedOver ? overnightStayCount : rawEligibleCount;
   const tokensGeneratedCount = tokensList.length;
-
-  // Meal-specific eligibility pools
-  const breakfastApproved = rawEligibleCount > 0 ? rawEligibleCount : overnightStayCount;
-  const lunchApproved = rawEligibleCount > 0 ? rawEligibleCount : overnightStayCount;
-  const dinnerApproved = rawEligibleCount;
 
   // Meal Session Breakdown Counts
   const mealSessionCounts = useMemo(() => {
@@ -176,90 +182,189 @@ export default function Dashboard() {
     return res;
   }, [tokensList]);
 
-  // Detailed Meal Session Metadata & Cycle Tracking
-  const sessionConfig = useMemo(() => {
-    const isTodayDraftOrEmpty = rawEligibleCount === 0;
+  // Session Timings Constant
+  const SESSION_TIMINGS: Record<MealSession, string> = {
+    BREAKFAST: '07:30 AM – 10:00 AM IST',
+    LUNCH: '12:00 PM – 03:30 PM IST',
+    DINNER: '07:30 PM – 10:30 PM IST',
+  };
 
+  // Detailed Meal Session Cards (Ordered strictly by Active 3-Meal Cycle: Dinner → Breakfast → Lunch)
+  const sessionCards = useMemo(() => {
     const isCurrentlyDinner = currentSession === 'DINNER';
     const isCurrentlyLunch = currentSession === 'LUNCH';
     const isCurrentlyBreakfast = currentSession === 'BREAKFAST';
 
-    // Dates for each meal:
-    // When viewing during DINNER (tonight), breakfast and lunch belong to tomorrow's overnight stay!
-    const breakfastTargetDate = isCurrentlyDinner ? tomorrowStr : todayStr;
-    const lunchTargetDate = isCurrentlyDinner ? tomorrowStr : todayStr;
-    const dinnerTargetDate = todayStr;
+    if (!isCurrentlyDinner) {
+      // -------------------------------------------------------------
+      // DAYTIME (Breakfast or Lunch): Resolving Yesterday's Night Stay
+      // Cycle: [1. Yesterday Dinner] -> [2. Today Breakfast] -> [3. Today Lunch]
+      // -------------------------------------------------------------
+      const activeApproved = overnightStayCount > 0 ? overnightStayCount : (rawEligibleCount > 0 ? rawEligibleCount : 0);
+      const dinnerApprovedCount = overnightStayCount > 0 ? overnightStayCount : (yesterdayDinnerTokensCount > 0 ? yesterdayDinnerTokensCount : 0);
+      const dinnerPending = Math.max(0, dinnerApprovedCount - yesterdayDinnerTokensCount);
+      const dinnerTurnout = dinnerApprovedCount > 0 ? Math.min(100, Math.round((yesterdayDinnerTokensCount / dinnerApprovedCount) * 100)) : (yesterdayDinnerTokensCount > 0 ? 100 : 0);
 
-    return {
-      BREAKFAST: {
-        id: 'BREAKFAST',
-        name: 'Breakfast',
-        icon: '🌅',
-        timing: '07:30 AM – 10:00 AM IST',
-        targetDate: breakfastTargetDate,
-        dateFormatted: formatISTDateDMY(breakfastTargetDate),
-        dayBadge: isCurrentlyDinner ? 'Tomorrow Morning' : (isCurrentlyBreakfast ? 'This Morning' : 'Earlier Today'),
-        status: isCurrentlyBreakfast ? 'ACTIVE' : (isCurrentlyLunch ? 'COMPLETED' : 'UPCOMING'),
-        statusLabel: isCurrentlyDinner ? 'Opens Tomorrow 07:30 AM' : (isCurrentlyBreakfast ? 'Active Now' : (isCurrentlyLunch ? 'Completed' : 'Upcoming')),
-        approved: breakfastApproved,
-        issued: isCurrentlyDinner ? 0 : mealSessionCounts.BREAKFAST,
-        pending: isCurrentlyDinner ? breakfastApproved : Math.max(0, breakfastApproved - mealSessionCounts.BREAKFAST),
-        turnout: isCurrentlyDinner ? 0 : (breakfastApproved > 0 ? Math.min(100, Math.round((mealSessionCounts.BREAKFAST / breakfastApproved) * 100)) : 0),
-        cycleLabel: isCurrentlyDinner
-          ? `Night Stay (${formatISTDateDMY(todayStr)})`
-          : (!isTodayDraftOrEmpty
-              ? `Approved List (${formatISTDateDMY(todayStr)})`
-              : (overnightStayCount > 0 ? `Night Stay (${formatISTDateDMY(yesterdayStr)})` : `No Approved List`)),
-        isNightCarryover: isCurrentlyDinner || (isTodayDraftOrEmpty && overnightStayCount > 0),
-        isFutureScheduled: isCurrentlyDinner,
-        lastTime: isCurrentlyDinner ? null : lastTokenTime.BREAKFAST,
-      },
-      LUNCH: {
-        id: 'LUNCH',
-        name: 'Lunch',
-        icon: '☀️',
-        timing: '12:00 PM – 03:30 PM IST',
-        targetDate: lunchTargetDate,
-        dateFormatted: formatISTDateDMY(lunchTargetDate),
-        dayBadge: isCurrentlyDinner ? 'Tomorrow Afternoon' : (isCurrentlyLunch ? 'This Afternoon' : 'Today Afternoon'),
-        status: isCurrentlyLunch ? 'ACTIVE' : 'UPCOMING',
-        statusLabel: isCurrentlyDinner ? 'Opens Tomorrow 12:00 PM' : (isCurrentlyLunch ? 'Active Now' : 'Opens Today 12:00 PM'),
-        approved: lunchApproved,
-        issued: isCurrentlyDinner ? 0 : mealSessionCounts.LUNCH,
-        pending: isCurrentlyDinner ? lunchApproved : Math.max(0, lunchApproved - mealSessionCounts.LUNCH),
-        turnout: isCurrentlyDinner ? 0 : (lunchApproved > 0 ? Math.min(100, Math.round((mealSessionCounts.LUNCH / lunchApproved) * 100)) : 0),
-        cycleLabel: isCurrentlyDinner
-          ? `Night Stay (${formatISTDateDMY(todayStr)})`
-          : (!isTodayDraftOrEmpty
-              ? `Approved List (${formatISTDateDMY(todayStr)})`
-              : (overnightStayCount > 0 ? `Night Stay (${formatISTDateDMY(yesterdayStr)})` : `No Approved List`)),
-        isNightCarryover: isCurrentlyDinner || (isTodayDraftOrEmpty && overnightStayCount > 0),
-        isFutureScheduled: isCurrentlyDinner,
-        lastTime: isCurrentlyDinner ? null : lastTokenTime.LUNCH,
-      },
-      DINNER: {
+      const breakfastTokens = mealSessionCounts.BREAKFAST;
+      const breakfastPending = Math.max(0, activeApproved - breakfastTokens);
+      const breakfastTurnout = activeApproved > 0 ? Math.min(100, Math.round((breakfastTokens / activeApproved) * 100)) : 0;
+
+      const lunchTokens = mealSessionCounts.LUNCH;
+      const lunchPending = Math.max(0, activeApproved - lunchTokens);
+      const lunchTurnout = activeApproved > 0 ? Math.min(100, Math.round((lunchTokens / activeApproved) * 100)) : 0;
+
+      const dinnerCard = {
         id: 'DINNER',
         name: 'Dinner',
         icon: '🌙',
-        timing: '07:30 PM – 10:30 PM IST',
-        targetDate: dinnerTargetDate,
-        dateFormatted: formatISTDateDMY(dinnerTargetDate),
+        timing: SESSION_TIMINGS.DINNER,
+        targetDate: yesterdayStr,
+        dateFormatted: formatISTDateDMY(yesterdayStr),
+        dayBadge: 'Last Night',
+        status: 'COMPLETED' as const,
+        statusLabel: 'Completed (Last Night)',
+        approved: dinnerApprovedCount,
+        issued: yesterdayDinnerTokensCount,
+        pending: dinnerPending,
+        turnout: dinnerTurnout,
+        cycleLabel: overnightStayCount > 0
+          ? `Night Stay (${formatISTDateDMY(yesterdayStr)})`
+          : (yesterdayDinnerTokensCount > 0 ? `Dinner Record (${formatISTDateDMY(yesterdayStr)})` : `Night Stay (${formatISTDateDMY(yesterdayStr)})`),
+        isNightCarryover: true,
+        isFutureScheduled: false,
+        lastTime: yesterdayLastDinnerTime,
+      };
+
+      const breakfastCard = {
+        id: 'BREAKFAST',
+        name: 'Breakfast',
+        icon: '🌅',
+        timing: SESSION_TIMINGS.BREAKFAST,
+        targetDate: todayStr,
+        dateFormatted: formatISTDateDMY(todayStr),
+        dayBadge: 'This Morning',
+        status: (isCurrentlyBreakfast ? 'ACTIVE' : 'COMPLETED') as 'ACTIVE' | 'COMPLETED',
+        statusLabel: isCurrentlyBreakfast ? 'Active Now' : 'Completed',
+        approved: activeApproved,
+        issued: breakfastTokens,
+        pending: breakfastPending,
+        turnout: breakfastTurnout,
+        cycleLabel: overnightStayCount > 0
+          ? `Night Stay (${formatISTDateDMY(yesterdayStr)})`
+          : (rawEligibleCount > 0 ? `Approved List (${formatISTDateDMY(todayStr)})` : `Night Stay (${formatISTDateDMY(yesterdayStr)})`),
+        isNightCarryover: overnightStayCount > 0,
+        isFutureScheduled: false,
+        lastTime: lastTokenTime.BREAKFAST,
+      };
+
+      const lunchCard = {
+        id: 'LUNCH',
+        name: 'Lunch',
+        icon: '☀️',
+        timing: SESSION_TIMINGS.LUNCH,
+        targetDate: todayStr,
+        dateFormatted: formatISTDateDMY(todayStr),
+        dayBadge: 'Today Afternoon',
+        status: (isCurrentlyLunch ? 'ACTIVE' : 'UPCOMING') as 'ACTIVE' | 'UPCOMING',
+        statusLabel: isCurrentlyLunch ? 'Active Now' : 'Opens Today 12:00 PM',
+        approved: activeApproved,
+        issued: lunchTokens,
+        pending: lunchPending,
+        turnout: lunchTurnout,
+        cycleLabel: overnightStayCount > 0
+          ? `Night Stay (${formatISTDateDMY(yesterdayStr)})`
+          : (rawEligibleCount > 0 ? `Approved List (${formatISTDateDMY(todayStr)})` : `Night Stay (${formatISTDateDMY(yesterdayStr)})`),
+        isNightCarryover: overnightStayCount > 0,
+        isFutureScheduled: false,
+        lastTime: lastTokenTime.LUNCH,
+      };
+
+      return [dinnerCard, breakfastCard, lunchCard];
+    } else {
+      // -------------------------------------------------------------
+      // NIGHTTIME (Once Lunch is completed -> Dinner session onwards):
+      // Cycle: [1. Today Dinner] -> [2. Tomorrow Breakfast] -> [3. Tomorrow Lunch]
+      // -------------------------------------------------------------
+      const dinnerTokens = mealSessionCounts.DINNER;
+      const dinnerPending = Math.max(0, rawEligibleCount - dinnerTokens);
+      const dinnerTurnout = rawEligibleCount > 0 ? Math.min(100, Math.round((dinnerTokens / rawEligibleCount) * 100)) : 0;
+
+      const dinnerCard = {
+        id: 'DINNER',
+        name: 'Dinner',
+        icon: '🌙',
+        timing: SESSION_TIMINGS.DINNER,
+        targetDate: todayStr,
+        dateFormatted: formatISTDateDMY(todayStr),
         dayBadge: 'Tonight',
-        status: isCurrentlyDinner ? 'ACTIVE' : 'UPCOMING',
-        statusLabel: isCurrentlyDinner ? 'Active Now' : 'Opens Tonight 07:30 PM',
-        approved: dinnerApproved,
-        issued: mealSessionCounts.DINNER,
-        pending: Math.max(0, dinnerApproved - mealSessionCounts.DINNER),
-        turnout: dinnerApproved > 0 ? Math.min(100, Math.round((mealSessionCounts.DINNER / dinnerApproved) * 100)) : 0,
-        cycleLabel: dinnerApproved > 0
+        status: 'ACTIVE' as const,
+        statusLabel: 'Active Now',
+        approved: rawEligibleCount,
+        issued: dinnerTokens,
+        pending: dinnerPending,
+        turnout: dinnerTurnout,
+        cycleLabel: rawEligibleCount > 0
           ? `Approved List (${formatISTDateDMY(todayStr)})`
           : `New List Required (${formatISTDateDMY(todayStr)})`,
         isNightCarryover: false,
         isFutureScheduled: false,
         lastTime: lastTokenTime.DINNER,
-      },
-    };
-  }, [currentSession, breakfastApproved, lunchApproved, dinnerApproved, mealSessionCounts, rawEligibleCount, overnightStayCount, todayStr, yesterdayStr, tomorrowStr, lastTokenTime]);
+      };
+
+      const breakfastCard = {
+        id: 'BREAKFAST',
+        name: 'Breakfast',
+        icon: '🌅',
+        timing: SESSION_TIMINGS.BREAKFAST,
+        targetDate: tomorrowStr,
+        dateFormatted: formatISTDateDMY(tomorrowStr),
+        dayBadge: 'Tomorrow Morning',
+        status: 'UPCOMING' as const,
+        statusLabel: 'Opens Tomorrow 07:30 AM',
+        approved: rawEligibleCount,
+        issued: 0,
+        pending: rawEligibleCount,
+        turnout: 0,
+        cycleLabel: `Night Stay (${formatISTDateDMY(todayStr)})`,
+        isNightCarryover: true,
+        isFutureScheduled: true,
+        lastTime: null,
+      };
+
+      const lunchCard = {
+        id: 'LUNCH',
+        name: 'Lunch',
+        icon: '☀️',
+        timing: SESSION_TIMINGS.LUNCH,
+        targetDate: tomorrowStr,
+        dateFormatted: formatISTDateDMY(tomorrowStr),
+        dayBadge: 'Tomorrow Afternoon',
+        status: 'UPCOMING' as const,
+        statusLabel: 'Opens Tomorrow 12:00 PM',
+        approved: rawEligibleCount,
+        issued: 0,
+        pending: rawEligibleCount,
+        turnout: 0,
+        cycleLabel: `Night Stay (${formatISTDateDMY(todayStr)})`,
+        isNightCarryover: true,
+        isFutureScheduled: true,
+        lastTime: null,
+      };
+
+      return [dinnerCard, breakfastCard, lunchCard];
+    }
+  }, [
+    currentSession,
+    rawEligibleCount,
+    overnightStayCount,
+    yesterdayDinnerTokensCount,
+    yesterdayLastDinnerTime,
+    mealSessionCounts,
+    lastTokenTime,
+    todayStr,
+    yesterdayStr,
+    tomorrowStr,
+  ]);
 
   // Active Session Stats
   const activeSessionTokensCount = mealSessionCounts[currentSession] || 0;
@@ -373,7 +478,7 @@ export default function Dashboard() {
               <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-300">
                 <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-400">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Active Window: {currentSession} ({sessionConfig[currentSession]?.timing})
+                  Active Window: {currentSession} ({SESSION_TIMINGS[currentSession]})
                 </span>
               </div>
             </div>
@@ -383,11 +488,11 @@ export default function Dashboard() {
             <div className="bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center gap-2">
               <span className="text-amber-400 text-sm">🌙</span>
               <div>
-                <span className="text-slate-400 text-[10px] block uppercase tracking-wider font-semibold">Overnight Stay Protocol (Option A)</span>
+                <span className="text-slate-400 text-[10px] block uppercase tracking-wider font-semibold">Overnight Stay Protocol</span>
                 <span className="text-slate-200 font-medium text-[11px]">
                   {currentSession === 'DINNER'
                     ? `Dinner tonight (${formatISTDateDMY(todayStr)}) carries over to tomorrow's Breakfast & Lunch (${formatISTDateDMY(tomorrowStr)})`
-                    : `Active cycle resolves from ${formatISTDateDMY(yesterdayStr)} Night-Stay list`}
+                    : `Active 3-Meal Cycle: ${formatISTDateDMY(yesterdayStr)} Dinner → ${formatISTDateDMY(todayStr)} Breakfast & Lunch`}
                 </span>
               </div>
             </div>
@@ -400,7 +505,9 @@ export default function Dashboard() {
         {/* Metric 1: Eligible Students */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-indigo-200 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Approved List Today</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              {isCarriedOver ? 'Active Night Stay List' : 'Approved List Today'}
+            </span>
             <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm">
               ✓
             </span>
@@ -408,13 +515,13 @@ export default function Dashboard() {
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-3xl font-bold text-slate-900">{eligibleCount}</span>
             <span className="text-xs text-slate-500">
-              {isCarriedOver ? 'night stay approved' : 'students approved'}
+              {isCarriedOver ? 'students approved for night stay' : 'students approved'}
             </span>
           </div>
           {isCarriedOver ? (
             <div className="mt-2 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5 font-medium flex items-center gap-1">
               <span>🌙</span>
-              <span>Overnight Stay cycle for {currentSession}</span>
+              <span>Night Stay approved on {formatISTDateDMY(yesterdayStr)} (Carries into Breakfast & Lunch)</span>
             </div>
           ) : (
             <div className="mt-2 text-[10px] text-slate-400 font-medium">
@@ -490,17 +597,19 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {Object.values(sessionConfig).map(meal => {
+          {sessionCards.map(meal => {
             const isCurrent = meal.status === 'ACTIVE';
             const isCompleted = meal.status === 'COMPLETED';
 
             const cardBorder = isCurrent
               ? (meal.id === 'BREAKFAST'
-                  ? 'border-amber-400/80 bg-linear-to-b from-amber-50/70 to-white ring-2 ring-amber-400/20'
-                  : meal.id === 'LUNCH'
-                    ? 'border-emerald-400/80 bg-linear-to-b from-emerald-50/70 to-white ring-2 ring-emerald-400/20'
-                    : 'border-indigo-400/80 bg-linear-to-b from-indigo-50/70 to-white ring-2 ring-indigo-400/20')
-              : 'border-slate-200 bg-white hover:border-slate-300';
+                ? 'border-amber-400/80 bg-linear-to-b from-amber-50/70 to-white ring-2 ring-amber-400/20'
+                : meal.id === 'LUNCH'
+                  ? 'border-emerald-400/80 bg-linear-to-b from-emerald-50/70 to-white ring-2 ring-emerald-400/20'
+                  : 'border-indigo-400/80 bg-linear-to-b from-indigo-50/70 to-white ring-2 ring-indigo-400/20')
+              : (isCompleted
+                ? 'border-slate-200/90 bg-slate-50/50 hover:border-slate-300'
+                : 'border-slate-200 bg-white hover:border-slate-300');
 
             const progressColor = meal.id === 'BREAKFAST'
               ? 'bg-amber-500'
@@ -533,8 +642,8 @@ export default function Dashboard() {
                           Active
                         </span>
                       ) : isCompleted ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">
-                          ✓ Completed
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-300 whitespace-nowrap">
+                          ✓ {meal.statusLabel || 'Completed'}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
@@ -553,13 +662,12 @@ export default function Dashboard() {
 
                   {/* Specific Day Cycle Origin Pill (Full Date Displayed - Never Truncated) */}
                   <div className="mb-3.5">
-                    <div className={`px-2.5 py-1.5 rounded-lg text-[11px] border font-medium flex items-center justify-between gap-2 ${
-                      meal.isNightCarryover
-                        ? 'bg-indigo-50/80 border-indigo-200 text-indigo-900'
-                        : meal.approved > 0
-                          ? 'bg-slate-50 border-slate-200 text-slate-700'
-                          : 'bg-amber-50 border-amber-200 text-amber-900'
-                    }`}>
+                    <div className={`px-2.5 py-1.5 rounded-lg text-[11px] border font-medium flex items-center justify-between gap-2 ${meal.isNightCarryover
+                      ? 'bg-indigo-50/80 border-indigo-200 text-indigo-900'
+                      : meal.approved > 0
+                        ? 'bg-slate-50 border-slate-200 text-slate-700'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                      }`}>
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="shrink-0">{meal.isNightCarryover ? '🌙' : '📋'}</span>
                         <span className="font-semibold text-slate-700 whitespace-nowrap">
@@ -616,6 +724,34 @@ export default function Dashboard() {
             );
           })}
         </div>
+
+        {/* Daytime Indicator for Tonight's Upcoming Night Stay */}
+        {currentSession !== 'DINNER' && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs mt-3">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center text-sm shrink-0">
+                🌙
+              </span>
+              <div>
+                <span className="font-bold text-slate-800">
+                  Tonight's Upcoming Night Stay ({formatISTDateDMY(todayStr)}):
+                </span>{' '}
+                <span className="text-slate-600">
+                  {rawEligibleCount > 0
+                    ? `${rawEligibleCount} students pre-approved for Dinner (Opens 07:30 PM) and tomorrow's Breakfast & Lunch (${formatISTDateDMY(tomorrowStr)})`
+                    : `No students added yet for tonight's stay. Create tonight's list in Daily Food List.`}
+                </span>
+              </div>
+            </div>
+            <Link
+              href="/daily-food-list"
+              className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold shrink-0"
+            >
+              <span>Manage Tonight's List</span>
+              <span>→</span>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* 3. Operational Overview & Pipeline */}
@@ -834,11 +970,10 @@ export default function Dashboard() {
                       <button
                         key={p}
                         onClick={() => setActivityPage(p)}
-                        className={`w-6 h-6 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
-                          activityPage === p
-                            ? 'bg-indigo-700 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-100'
-                        }`}
+                        className={`w-6 h-6 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${activityPage === p
+                          ? 'bg-indigo-700 text-white shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                          }`}
                       >
                         {p}
                       </button>
