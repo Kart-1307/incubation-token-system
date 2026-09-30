@@ -179,12 +179,16 @@ function DailyFoodListContent() {
   const [showLetterModal, setShowLetterModal] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
 
-  // Phone connection & scanner URL state (clean origin, no localtunnel fallback)
+  // Phone connection & scanner URL state (clean origin, auto-fallback to public production domain if on protected Vercel preview)
   const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('last_mobile_scanner_url');
       if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
         return saved;
+      }
+      const hostname = window.location.hostname;
+      if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
+        return 'https://incubation-token-system-five.vercel.app';
       }
       return window.location.origin;
     }
@@ -412,14 +416,19 @@ function DailyFoodListContent() {
     }
   }, [activeTab, loadLogs]);
 
-  // Sync mobile scanner URL to window.location.origin
+  // Sync mobile scanner URL to public production domain or window.location.origin
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('last_mobile_scanner_url');
       if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
         setTunnelUrlInput(saved);
       } else {
-        setTunnelUrlInput(window.location.origin);
+        const hostname = window.location.hostname;
+        if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
+          setTunnelUrlInput('https://incubation-token-system-five.vercel.app');
+        } else {
+          setTunnelUrlInput(window.location.origin);
+        }
       }
     }
   }, []);
@@ -1636,14 +1645,24 @@ function DailyFoodListContent() {
 
             {/* Mobile Scanner URL & Copy Link */}
             <div className="space-y-2 text-xs">
-              <label className="font-semibold text-slate-700 block">Mobile Scanner Link:</label>
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-slate-700 block">Mobile Scanner Link:</label>
+                {typeof window !== 'undefined' && window.location.hostname.includes('-') && window.location.hostname.endsWith('.vercel.app') && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    ✓ Public Domain (No Login)
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2">
                 <input
                   value={(() => {
                     const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
                     return `${clean}/mobile-scan?mode=intake&date=${selectedDate}`;
                   })()}
-                  readOnly
+                  onChange={e => {
+                    const val = e.target.value.replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
+                    setTunnelUrlInput(val);
+                  }}
                   onClick={e => (e.target as HTMLInputElement).select()}
                   className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono bg-slate-50 text-slate-700 select-all focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
@@ -1663,7 +1682,7 @@ function DailyFoodListContent() {
               </div>
 
               <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-                <span>Point phone camera at QR code to scan barcodes.</span>
+                <span>Point phone camera at QR code to open directly.</span>
                 <a
                   href={`${(tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '')}/mobile-scan?mode=intake&date=${selectedDate}`}
                   target="_blank"

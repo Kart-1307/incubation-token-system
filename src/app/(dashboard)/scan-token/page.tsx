@@ -51,6 +51,10 @@ export default function ScanToken() {
       if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
         return saved;
       }
+      const hostname = window.location.hostname;
+      if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
+        return 'https://incubation-token-system-five.vercel.app';
+      }
       return window.location.origin;
     }
     return '';
@@ -66,14 +70,19 @@ export default function ScanToken() {
     generatedTokenRef.current = generatedToken;
   }, [state, generatedToken]);
 
-  // Initialize and persist mobile scanner URL (clean origin)
+  // Initialize and persist mobile scanner URL (clean origin, auto-fallback to production domain)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('last_mobile_scanner_url');
       if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
         setTunnelUrlInput(saved);
       } else {
-        setTunnelUrlInput(window.location.origin);
+        const hostname = window.location.hostname;
+        if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
+          setTunnelUrlInput('https://incubation-token-system-five.vercel.app');
+        } else {
+          setTunnelUrlInput(window.location.origin);
+        }
       }
     }
   }, [showPhoneQrModal]);
@@ -1081,16 +1090,26 @@ export default function ScanToken() {
 
               {/* Mobile Scanner URL & Copy Link */}
               <div className="w-full mt-4 text-left">
-                <label className="text-[11px] font-semibold text-slate-500 block mb-1">
-                  Mobile Scanner Link:
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-slate-500 block">
+                    Mobile Scanner Link:
+                  </label>
+                  {typeof window !== 'undefined' && window.location.hostname.includes('-') && window.location.hostname.endsWith('.vercel.app') && (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      ✓ Public Domain (No Login)
+                    </span>
+                  )}
+                </div>
                 <div className="flex gap-1.5">
                   <input
                     value={(() => {
                       const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
                       return `${clean}/mobile-scan`;
                     })()}
-                    readOnly
+                    onChange={e => {
+                      const val = e.target.value.replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
+                      setTunnelUrlInput(val);
+                    }}
                     onClick={e => (e.target as HTMLInputElement).select()}
                     className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono bg-slate-50 text-slate-700 select-all focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
