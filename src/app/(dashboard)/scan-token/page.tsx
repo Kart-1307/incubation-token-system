@@ -844,8 +844,8 @@ export default function ScanToken() {
             </div>
             <div className="max-w-xs mx-auto bg-white border border-slate-300 rounded-lg p-5 text-xs leading-tight shadow-sm text-slate-900">
               <div className="text-center border-b border-dashed border-slate-300 pb-3 mb-3">
-                <div className="font-bold text-[13px]">SRI SAIRAM ENGINEERING COLLEGE</div>
-                <div className="text-[11px] text-slate-600">INCUBATION CENTRE</div>
+                <div className="font-bold text-[12px]">SRI SAIRAM TECHNO INCUBATOR FOUNDATION</div>
+                <div className="text-[10px] text-slate-600">FOOD TOKEN SYSTEM</div>
                 <div className="font-bold text-[13px] mt-1 text-indigo-900">FOOD TOKEN SLIP</div>
               </div>
 

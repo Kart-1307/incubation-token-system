@@ -118,6 +118,8 @@ model DailyFoodEligibility {
   @@index([date])
   @@index([studentId])
   @@index([projectCode])
+  @@index([date, studentId])
+  @@index([date, status])
   @@map("daily_food_eligibilities")
 }
 
@@ -145,5 +147,7 @@ model FoodToken {
   @@index([studentId])
   @@index([projectCode])
   @@index([issuedAt])
+  @@index([date, session])
+  @@index([date, studentId, session])
   @@map("food_tokens")
 }

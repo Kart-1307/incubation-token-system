@@ -147,8 +147,8 @@ export default function DashboardLayout({
         {/* Top Header - College branding on left, normal date on right */}
         <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between shrink-0 shadow-xs">
           <div>
-            <div className="text-sm font-semibold text-slate-800">Sri Sairam Engineering College</div>
-            <div className="text-xs text-slate-400">Incubation Centre · Food Management System</div>
+            <div className="text-sm font-bold text-slate-900">Sri Sairam Techno Incubator Foundation</div>
+            <div className="text-xs text-slate-500">Food Operations & Token Management System</div>
           </div>
 
           <div className="flex items-center">

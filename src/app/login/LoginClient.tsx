@@ -83,11 +83,14 @@ export default function LoginClient() {
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-4">
-        {/* Official College Logo & Subtitle */}
+        {/* Official Foundation Logo & Header */}
         <div className="flex flex-col items-center justify-center text-center">
           <OfficialSairamLogo className="mb-3" />
-          <div className="bg-indigo-900 text-white text-xs font-semibold tracking-wider px-4 py-1.5 rounded-full shadow-xs">
-            INCUBATION CENTRE · FOOD MANAGEMENT SYSTEM
+          <h1 className="text-base font-black text-slate-900 tracking-tight uppercase">
+            Sri Sairam Techno Incubator Foundation
+          </h1>
+          <div className="mt-2 bg-indigo-950 text-indigo-200 text-[11px] font-semibold tracking-wider px-4 py-1 rounded-full shadow-xs border border-indigo-800/60">
+            FOOD TOKEN MANAGEMENT SYSTEM
           </div>
         </div>
 
@@ -124,7 +127,7 @@ export default function LoginClient() {
             <form onSubmit={handleSignInSubmit} className="space-y-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-800">Staff Portal Sign In</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Access staff controls and food token system</p>
+                <p className="text-xs text-slate-500 mt-0.5">Authorized access for Sri Sairam Techno Incubator Foundation</p>
               </div>
 
               {signInError && (

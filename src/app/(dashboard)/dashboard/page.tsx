@@ -16,6 +16,8 @@ import {
   formatISTDateShort,
   formatISTDateWithDay,
   formatISTTime,
+  SESSION_TIMINGS,
+  getSessionStatus,
   type MealSession,
 } from '@/utils/timeUtils';
 
@@ -182,13 +184,6 @@ export default function Dashboard() {
     return res;
   }, [tokensList]);
 
-  // Session Timings Constant
-  const SESSION_TIMINGS: Record<MealSession, string> = {
-    BREAKFAST: '07:30 AM – 10:00 AM IST',
-    LUNCH: '12:00 PM – 03:30 PM IST',
-    DINNER: '07:30 PM – 10:30 PM IST',
-  };
-
   // Detailed Meal Session Cards (Ordered strictly by Active 3-Meal Cycle: Dinner → Breakfast → Lunch)
   const sessionCards = useMemo(() => {
     const isCurrentlyDinner = currentSession === 'DINNER';
@@ -202,14 +197,15 @@ export default function Dashboard() {
       // -------------------------------------------------------------
       const activeApproved = overnightStayCount > 0 ? overnightStayCount : (rawEligibleCount > 0 ? rawEligibleCount : 0);
       const dinnerApprovedCount = overnightStayCount > 0 ? overnightStayCount : (yesterdayDinnerTokensCount > 0 ? yesterdayDinnerTokensCount : 0);
-      const dinnerPending = Math.max(0, dinnerApprovedCount - yesterdayDinnerTokensCount);
-      const dinnerTurnout = dinnerApprovedCount > 0 ? Math.min(100, Math.round((yesterdayDinnerTokensCount / dinnerApprovedCount) * 100)) : (yesterdayDinnerTokensCount > 0 ? 100 : 0);
+      const dinnerIssued = Math.min(yesterdayDinnerTokensCount, dinnerApprovedCount);
+      const dinnerPending = Math.max(0, dinnerApprovedCount - dinnerIssued);
+      const dinnerTurnout = dinnerApprovedCount > 0 ? Math.min(100, Math.round((dinnerIssued / dinnerApprovedCount) * 100)) : (dinnerIssued > 0 ? 100 : 0);
 
-      const breakfastTokens = mealSessionCounts.BREAKFAST;
+      const breakfastTokens = Math.min(mealSessionCounts.BREAKFAST, activeApproved);
       const breakfastPending = Math.max(0, activeApproved - breakfastTokens);
       const breakfastTurnout = activeApproved > 0 ? Math.min(100, Math.round((breakfastTokens / activeApproved) * 100)) : 0;
 
-      const lunchTokens = mealSessionCounts.LUNCH;
+      const lunchTokens = Math.min(mealSessionCounts.LUNCH, activeApproved);
       const lunchPending = Math.max(0, activeApproved - lunchTokens);
       const lunchTurnout = activeApproved > 0 ? Math.min(100, Math.round((lunchTokens / activeApproved) * 100)) : 0;
 
@@ -224,7 +220,7 @@ export default function Dashboard() {
         status: 'COMPLETED' as const,
         statusLabel: 'Completed (Last Night)',
         approved: dinnerApprovedCount,
-        issued: yesterdayDinnerTokensCount,
+        issued: dinnerIssued,
         pending: dinnerPending,
         turnout: dinnerTurnout,
         cycleLabel: overnightStayCount > 0
@@ -285,7 +281,7 @@ export default function Dashboard() {
       // NIGHTTIME (Once Lunch is completed -> Dinner session onwards):
       // Cycle: [1. Today Dinner] -> [2. Tomorrow Breakfast] -> [3. Tomorrow Lunch]
       // -------------------------------------------------------------
-      const dinnerTokens = mealSessionCounts.DINNER;
+      const dinnerTokens = Math.min(mealSessionCounts.DINNER, rawEligibleCount);
       const dinnerPending = Math.max(0, rawEligibleCount - dinnerTokens);
       const dinnerTurnout = rawEligibleCount > 0 ? Math.min(100, Math.round((dinnerTokens / rawEligibleCount) * 100)) : 0;
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getMealSession } from '@/utils/timeUtils';
+import { getMealSession, getTodayISTDateString, formatISTDateDMY } from '@/utils/timeUtils';
 
 type ScanStatus =
   | 'idle'
@@ -54,8 +54,11 @@ export default function MobileScanPage() {
 function MobileScanContent() {
   const searchParams = useSearchParams();
   const urlMode = searchParams.get('mode') === 'intake' ? 'intake' : 'token';
+  const urlDate = searchParams.get('date');
+  const todayStr = getTodayISTDateString();
 
   const [scanMode, setScanMode] = useState<'token' | 'intake'>(urlMode);
+  const [targetDate, setTargetDate] = useState<string>(() => urlDate || todayStr);
   const [status, setStatus] = useState<ScanStatus>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('Ready to start camera');
   const [lastScannedCode, setLastScannedCode] = useState<string>('');
@@ -75,6 +78,7 @@ function MobileScanContent() {
   const statusRef = useRef<ScanStatus>(status);
   const resultDataRef = useRef<ScanResultData | null>(resultData);
   const scanModeRef = useRef<'token' | 'intake'>(scanMode);
+  const targetDateRef = useRef<string>(targetDate);
   const lastScanTimeRef = useRef<number>(0);
   const lastScannedCodeRef = useRef<string>('');
 
@@ -82,7 +86,8 @@ function MobileScanContent() {
     statusRef.current = status;
     resultDataRef.current = resultData;
     scanModeRef.current = scanMode;
-  }, [status, resultData, scanMode]);
+    targetDateRef.current = targetDate;
+  }, [status, resultData, scanMode, targetDate]);
 
   // Synthesize audio feedback via Web Audio API (instant, no external file download)
   const playSound = useCallback((type: 'success' | 'warning' | 'error') => {
@@ -154,7 +159,7 @@ function MobileScanContent() {
       const currentMode = scanModeRef.current;
       setStatusMessage(
         currentMode === 'intake'
-          ? `Adding ${cleanCode} to Food List...`
+          ? `Adding ${cleanCode} to ${formatISTDateDMY(targetDateRef.current)} List...`
           : `Verifying ${cleanCode} for Token...`
       );
 
@@ -165,6 +170,7 @@ function MobileScanContent() {
           body: JSON.stringify({
             studentId: cleanCode,
             mode: currentMode,
+            date: targetDateRef.current,
           }),
         });
 
@@ -587,6 +593,40 @@ function MobileScanContent() {
           </span>
         </div>
       </div>
+
+      {/* Dynamic Target Food List Banner for Intake Mode */}
+      {scanMode === 'intake' && (
+        <div className="px-4 py-2.5 bg-sky-950/90 border-b border-sky-800/80 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🎯</span>
+            <div>
+              <div className="text-[10px] uppercase font-bold text-sky-300 tracking-wider">
+                Intake Target List
+              </div>
+              <div className="font-bold text-white text-xs flex items-center gap-1.5 mt-0.5">
+                <span>{formatISTDateDMY(targetDate)}</span>
+                {targetDate === todayStr && (
+                  <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded text-[10px] font-semibold border border-emerald-500/30">
+                    Today
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <label className="text-[10px] text-sky-300 font-medium">Switch Date:</label>
+            <input
+              type="date"
+              value={targetDate}
+              onChange={(e) => {
+                if (e.target.value) setTargetDate(e.target.value);
+              }}
+              className="bg-slate-900 text-sky-200 border border-sky-700/80 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-sky-400 cursor-pointer"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Main Viewfinder Center */}
       <main className="relative flex-1 flex flex-col items-center justify-center p-4 overflow-hidden">

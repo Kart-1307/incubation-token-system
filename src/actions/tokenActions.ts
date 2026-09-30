@@ -459,6 +459,7 @@ export async function issueFoodToken(
         if (createErr.code === 'P2002') {
           return {
             success: false,
+            isDuplicate: true,
             message: `Token already generated for ${student.name} for today's ${session} session.`,
           };
         }

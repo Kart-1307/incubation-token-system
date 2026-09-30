@@ -12,13 +12,15 @@ import {
   addBulkStudentsToDailyList,
   removeStudentFromDailyList,
   getDatewiseFoodLogs,
+  getNightStayBatchAudit,
   scanStudentIntoDailyFoodList,
   type FoodListDetails,
   type DatewiseLogSummary,
+  type NightStayBatchAuditDetails,
 } from '@/actions/foodListActions';
 import { getFoodTokens } from '@/actions/tokenActions';
 import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
-import { getTodayISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
+import { getTodayISTDateString, getNextISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 
 type ActiveTab = 'list' | 'tokens' | 'logs';
 
@@ -79,6 +81,9 @@ function DailyFoodListContent() {
   // Datewise logs state
   const [datewiseLogs, setDatewiseLogs] = useState<DatewiseLogSummary[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [selectedBatchAudit, setSelectedBatchAudit] = useState<NightStayBatchAuditDetails | null>(null);
+  const [batchAuditLoading, setBatchAuditLoading] = useState(false);
+  const [showBatchAuditModal, setShowBatchAuditModal] = useState(false);
 
   // Modals state for daily list
   const [showAddStudent, setShowAddStudent] = useState(false);
@@ -219,6 +224,21 @@ function DailyFoodListContent() {
     }
   }, []);
 
+  // Load detailed student-level audit for a night stay batch
+  const openBatchAudit = useCallback(async (date: string) => {
+    setBatchAuditLoading(true);
+    setShowBatchAuditModal(true);
+    try {
+      const details = await getNightStayBatchAudit(date);
+      setSelectedBatchAudit(details);
+    } catch (e) {
+      console.error(e);
+      showToast('Error loading batch audit details.');
+    } finally {
+      setBatchAuditLoading(false);
+    }
+  }, []);
+
   const initialLoadRef = useRef(false);
 
   useEffect(() => {
@@ -275,9 +295,9 @@ function DailyFoodListContent() {
     if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
       clean = `https://${clean}`;
     }
-    // Generate QR with explicit mode=intake parameter
+    // Generate QR with explicit mode=intake and current selectedDate parameter
     const baseUrl = clean.replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-    const target = `${baseUrl}/mobile-scan?mode=intake`;
+    const target = `${baseUrl}/mobile-scan?mode=intake&date=${selectedDate}`;
     QRCode.toDataURL(target, { width: 220, margin: 1, color: { dark: '#0369a1', light: '#ffffff' } })
       .then(url => setPhoneQrDataUrl(url))
       .catch(err => console.error('QR generation error:', err));
@@ -285,7 +305,7 @@ function DailyFoodListContent() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('last_mobile_scanner_url', clean);
     }
-  }, [tunnelUrlInput]);
+  }, [tunnelUrlInput, selectedDate]);
 
   // Real-time Server-Sent Events listener for phone scans and token generation
   useEffect(() => {
@@ -301,11 +321,15 @@ function DailyFoodListContent() {
 
           // Real-time notification when a phone adds student to Food List
           if (payload.type === 'FOOD_LIST_ADDED') {
-            loadData(selectedDate);
-            playChime('success');
-            showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to Food List!`);
+            if (payload.date === selectedDate) {
+              loadData(selectedDate);
+              playChime('success');
+              showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(selectedDate)} Food List!`);
+            } else {
+              showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(payload.date)} List!`);
+            }
           } else if (payload.type === 'FOOD_LIST_DUPLICATE') {
-            showToast(`📲 Phone Scan: ${payload.studentName || payload.studentId} is already on today's list.`);
+            showToast(`📲 Phone Scan: ${payload.studentName || payload.studentId} is already on ${formatISTDateDMY(payload.date || selectedDate)} list.`);
           } else if (payload.type === 'TOKEN_ISSUED') {
             loadTokens(activeTab === 'tokens' ? tokenDateFilter : selectedDate);
           }
@@ -980,27 +1004,33 @@ function DailyFoodListContent() {
       {/* ========================================================================= */}
       {activeTab === 'logs' && (
         <div className="space-y-5">
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex items-center justify-between">
+          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="font-semibold text-slate-800">Historical Mess Turnout & Token Log</h3>
+              <h3 className="font-semibold text-slate-800 text-base flex items-center gap-2">
+                <span>📊</span>
+                <span>Mess Turnout &amp; Food Token Audit</span>
+              </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Audit student turnout, eligible allocations, and tokens claimed date-by-date.
+                Accurately tracking the 3-meal night-stay cycle (Dinner → Breakfast → Lunch) per incubation cohort.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* Actions */}
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={loadLogs}
                 className="px-3 py-1.5 text-xs font-medium border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
               >
-                ↻ Refresh Logs
+                ↻ Refresh
               </button>
+
               <a
                 href="/api/reports/export?type=logs&format=csv"
                 download
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-xs"
               >
                 <span>📥</span>
-                <span>Export Turnout CSV</span>
+                <span>Export CSV</span>
               </a>
             </div>
           </div>
@@ -1009,49 +1039,78 @@ function DailyFoodListContent() {
             {logsLoading ? (
               <div className="py-16 text-center text-slate-400 text-sm">
                 <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-2"></div>
-                Analyzing historical logs...
+                Analyzing historical night-stay cohorts...
               </div>
             ) : datewiseLogs.length === 0 ? (
               <div className="py-16 text-center">
                 <div className="text-3xl mb-3">📅</div>
                 <div className="font-medium text-slate-700">No historical logs found</div>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  Historical food lists and issued token logs will appear here automatically.
+                  Night-stay food lists and issued token logs will appear here automatically.
                 </p>
               </div>
             ) : (
+              /* NIGHT-STAY COHORT AUDIT (DINNER -> BREAKFAST -> LUNCH) */
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     <tr>
-                      <th className="px-4 py-3">Date</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 text-center">Eligible Students</th>
-                      <th className="px-4 py-3 text-center">Tokens Claimed</th>
-                      <th className="px-4 py-3">Turnout Rate</th>
-                      <th className="px-4 py-3">Sessions (B / L / D)</th>
-                      <th className="px-4 py-3 text-right">Quick Action</th>
+                      <th className="px-4 py-3">Night-Stay Batch</th>
+                      <th className="px-4 py-3">Shift Status</th>
+                      <th className="px-4 py-3 text-center">Diners Approved</th>
+                      <th className="px-4 py-3 text-center">Meal 1: Dinner</th>
+                      <th className="px-4 py-3 text-center">Meal 2: Breakfast</th>
+                      <th className="px-4 py-3 text-center">Meal 3: Lunch</th>
+                      <th className="px-4 py-3">Cycle Turnout</th>
+                      <th className="px-4 py-3 text-right">Audit &amp; Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {datewiseLogs.map((log, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                         <td className="px-4 py-3 font-semibold text-slate-900 text-sm">
-                          {formatISTDateDMY(log.date)}
-                          {log.date === todayStr && (
-                            <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
-                              Today
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            <span>{formatISTDateDMY(log.date)} Stay</span>
+                            {log.date === todayStr && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded">
+                                Tonight
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-normal mt-0.5">
+                            Dinner ({formatISTDateDMY(log.date)}) → B&apos;fast &amp; Lunch ({formatISTDateDMY(log.nextDate)})
+                          </div>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge status="Approved" />
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                              log.cycleStatus === 'Completed'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : log.cycleStatus === 'In Progress'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200 animate-pulse'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            {log.cycleStatus}
+                          </span>
                         </td>
-                        <td className="px-4 py-3 text-center font-mono font-bold text-slate-700">
+                        <td className="px-4 py-3 text-center font-mono font-bold text-slate-800">
                           {log.totalEligible}
                         </td>
-                        <td className="px-4 py-3 text-center font-mono font-bold text-indigo-700">
-                          {log.totalTokensIssued}
+                        <td className="px-4 py-3 text-center">
+                          <span className="px-2 py-1 rounded bg-purple-50 text-purple-900 border border-purple-200 text-xs font-semibold font-mono">
+                            {log.dinnerCount} / {log.totalEligible}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="px-2 py-1 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs font-semibold font-mono">
+                            {log.breakfastCount} / {log.totalEligible}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="px-2 py-1 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-semibold font-mono">
+                            {log.lunchCount} / {log.totalEligible}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
@@ -1061,34 +1120,22 @@ function DailyFoodListContent() {
                                 style={{ width: `${Math.min(100, log.turnoutPercentage)}%` }}
                               />
                             </div>
-                            <span className="text-xs font-semibold text-slate-700">
+                            <span className="text-xs font-bold text-slate-800">
                               {log.turnoutPercentage}%
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ({log.totalMealsServed}/{log.maxPossibleMeals})
                             </span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-600">
-                          <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 font-mono font-medium mr-1">
-                            B: {log.breakfastCount}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono font-medium mr-1">
-                            L: {log.lunchCount}
-                          </span>
-                          {log.dinnerCount > 0 && (
-                            <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-800 font-mono font-medium">
-                              D: {log.dinnerCount}
-                            </span>
-                          )}
-                        </td>
                         <td className="px-4 py-3 text-right">
                           <button
-                            onClick={() => {
-                              setSelectedDate(log.date);
-                              setTokenDateFilter(log.date);
-                              switchTab('tokens');
-                            }}
-                            className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2.5 py-1 rounded hover:bg-indigo-50 transition-colors cursor-pointer"
+                            type="button"
+                            onClick={() => openBatchAudit(log.date)}
+                            className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors cursor-pointer inline-flex items-center gap-1 shadow-2xs"
                           >
-                            View Tokens →
+                            <span>📋</span>
+                            <span>Batch Audit</span>
                           </button>
                         </td>
                       </tr>
@@ -1105,7 +1152,173 @@ function DailyFoodListContent() {
       {/* MODALS & OVERLAYS                                                         */}
       {/* ========================================================================= */}
 
+      {/* 1. Night Stay Batch Student-Level Audit Modal */}
+      {showBatchAuditModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div>
+                <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                  <span>🌙</span>
+                  <span>Night-Stay Cohort Audit: {selectedBatchAudit ? formatISTDateDMY(selectedBatchAudit.date) : 'Loading...'}</span>
+                </h3>
+                {selectedBatchAudit && (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Cycle: Dinner ({formatISTDateDMY(selectedBatchAudit.date)}) → Breakfast &amp; Lunch ({formatISTDateDMY(selectedBatchAudit.nextDate)})
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBatchAuditModal(false);
+                  setSelectedBatchAudit(null);
+                }}
+                className="w-8 h-8 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
 
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              {batchAuditLoading ? (
+                <div className="py-20 text-center text-slate-400">
+                  <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-2"></div>
+                  Loading student-level batch attendance...
+                </div>
+              ) : !selectedBatchAudit ? (
+                <div className="py-16 text-center text-slate-500">
+                  No audit details found for this batch.
+                </div>
+              ) : (
+                <>
+                  {/* Summary KPI Strip */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Approved Diners</div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">{selectedBatchAudit.totalEligible}</div>
+                    </div>
+                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-center">
+                      <div className="text-[10px] font-bold text-purple-700 uppercase tracking-wider">Meal 1: Dinner</div>
+                      <div className="text-lg font-black text-purple-900 mt-0.5">
+                        {selectedBatchAudit.dinnerCount} / {selectedBatchAudit.totalEligible}
+                      </div>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                      <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Meal 2: Breakfast</div>
+                      <div className="text-lg font-black text-amber-900 mt-0.5">
+                        {selectedBatchAudit.breakfastCount} / {selectedBatchAudit.totalEligible}
+                      </div>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+                      <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Meal 3: Lunch</div>
+                      <div className="text-lg font-black text-emerald-900 mt-0.5">
+                        {selectedBatchAudit.lunchCount} / {selectedBatchAudit.totalEligible}
+                      </div>
+                    </div>
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                      <div className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">Cycle Turnout</div>
+                      <div className="text-lg font-black text-indigo-900 mt-0.5">
+                        {selectedBatchAudit.turnoutPercentage}%
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Student Attendance Roster Table */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                        <tr>
+                          <th className="px-3 py-2.5">#</th>
+                          <th className="px-3 py-2.5">Roll ID</th>
+                          <th className="px-3 py-2.5">Student Name</th>
+                          <th className="px-3 py-2.5">Project</th>
+                          <th className="px-3 py-2.5 text-center">Meal 1: Dinner</th>
+                          <th className="px-3 py-2.5 text-center">Meal 2: Breakfast</th>
+                          <th className="px-3 py-2.5 text-center">Meal 3: Lunch</th>
+                          <th className="px-3 py-2.5 text-center">Meals Claimed</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {selectedBatchAudit.students.map((st, sIdx) => (
+                          <tr key={st.studentId} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-3 py-2.5 text-slate-400 font-mono">{sIdx + 1}</td>
+                            <td className="px-3 py-2.5 font-mono font-bold text-slate-900">{st.studentId}</td>
+                            <td className="px-3 py-2.5 font-semibold text-slate-800">{st.studentName}</td>
+                            <td className="px-3 py-2.5 font-mono text-indigo-700">{st.projectCode}</td>
+                            <td className="px-3 py-2.5 text-center">
+                              {st.dinner.issued ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-semibold text-[11px]">
+                                  <span>✓</span>
+                                  <span>{st.dinner.time || 'Claimed'}</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-mono">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              {st.breakfast.issued ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold text-[11px]">
+                                  <span>✓</span>
+                                  <span>{st.breakfast.time || 'Claimed'}</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-mono">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              {st.lunch.issued ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold text-[11px]">
+                                  <span>✓</span>
+                                  <span>{st.lunch.time || 'Claimed'}</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-mono">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                  st.mealsClaimed === 3
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : st.mealsClaimed > 0
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-rose-100 text-rose-800'
+                                }`}
+                              >
+                                {st.mealsClaimed} / 3 Meals
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Official attendance record of Sri Sairam Techno Incubator Foundation
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBatchAuditModal(false);
+                  setSelectedBatchAudit(null);
+                }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold cursor-pointer"
+              >
+                Close Audit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Connect Mobile Phone Modal (Food List Intake Mode) */}
       {showPhoneModal && (
@@ -1127,6 +1340,15 @@ function DailyFoodListContent() {
               >
                 ✕
               </button>
+            </div>
+
+            {/* Target Date Pill */}
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 flex items-center justify-between text-xs">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-indigo-700 tracking-wider">Active Target List:</span>
+                <div className="font-bold text-indigo-950 text-xs mt-0.5">{formatISTDateDMY(selectedDate)} (Night Stay Batch)</div>
+              </div>
+              <span className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[10px] font-bold">Auto-Synced</span>
             </div>
 
             {/* QR Code Card */}
@@ -1163,7 +1385,7 @@ function DailyFoodListContent() {
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <p className="text-[11px] text-slate-500">
-                Any student scanned on this phone is immediately added to today&rsquo;s food list in real-time.
+                Scanned students from this phone will be added to the <strong>{formatISTDateDMY(selectedDate)}</strong> food list.
               </p>
             </div>
 

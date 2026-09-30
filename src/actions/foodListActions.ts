@@ -4,7 +4,13 @@ import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
-import { getTodayISTDateString } from '@/utils/timeUtils';
+import {
+  getTodayISTDateString,
+  getNextISTDateString,
+  getPreviousISTDateString,
+  getMealSession,
+  formatISTTime,
+} from '@/utils/timeUtils';
 
 export interface FoodListEntry {
   studentId: string;
@@ -373,16 +379,55 @@ export async function finalizeFoodList(
 }
 
 export interface DatewiseLogSummary {
-  date: string;
+  date: string; // The Night-Stay date (e.g. 2026-09-29)
+  nextDate: string; // The morning/afternoon date (e.g. 2026-09-30)
   status: 'Draft' | 'Finalized';
+  cycleStatus: 'Upcoming' | 'In Progress' | 'Completed';
   finalizedBy?: string | null;
   finalizedAt?: string | null;
+  totalEligible: number; // Students registered for overnight stay on Date D
+
+  // 3-Meal Night-Stay Cycle Tokens
+  dinnerCount: number; // Meal 1: Dinner on Date D
+  breakfastCount: number; // Meal 2: Breakfast on Date D+1
+  lunchCount: number; // Meal 3: Lunch on Date D+1
+  totalMealsServed: number; // Dinner + Breakfast + Lunch for this cohort
+  totalTokensIssued: number; // Backward-compatible alias for totalMealsServed
+  maxPossibleMeals: number; // totalEligible * 3
+  turnoutPercentage: number; // (totalMealsServed / maxPossibleMeals) * 100 (capped at 100%)
+
+  // Kitchen Calendar Day Serving (Alternative perspective for catering)
+  kitchenBreakfastCount: number; // Breakfast plates served on calendar Date D
+  kitchenLunchCount: number; // Lunch plates served on calendar Date D
+  kitchenDinnerCount: number; // Dinner plates served on calendar Date D
+  kitchenTotalPlates: number; // Sum of B + L + D plates served on calendar Date D
+}
+
+export interface StudentMealAudit {
+  studentId: string;
+  studentName: string;
+  department: string;
+  year: number;
+  projectCode: string;
+  dinner: { issued: boolean; tokenNumber?: string; time?: string };
+  breakfast: { issued: boolean; tokenNumber?: string; time?: string };
+  lunch: { issued: boolean; tokenNumber?: string; time?: string };
+  mealsClaimed: number;
+}
+
+export interface NightStayBatchAuditDetails {
+  date: string;
+  nextDate: string;
+  status: string;
+  cycleStatus: string;
   totalEligible: number;
-  totalTokensIssued: number;
+  dinnerCount: number;
   breakfastCount: number;
   lunchCount: number;
-  dinnerCount: number;
+  totalMealsServed: number;
+  maxPossibleMeals: number;
   turnoutPercentage: number;
+  students: StudentMealAudit[];
 }
 
 export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
@@ -391,7 +436,7 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
       const [allLists, allEligibilities, allTokens] = await Promise.all([
         prisma.dailyFoodList.findMany(),
         prisma.dailyFoodEligibility.findMany({ select: { date: true, studentId: true } }),
-        prisma.foodToken.findMany({ select: { date: true, session: true, tokenNumber: true } }),
+        prisma.foodToken.findMany({ select: { date: true, studentId: true, session: true, tokenNumber: true, issuedAt: true } }),
       ]);
 
       const dateSet = new Set<string>();
@@ -399,49 +444,221 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
       (allEligibilities || []).forEach((e: any) => { if (e.date) dateSet.add(e.date); });
       (allTokens || []).forEach((t: any) => { if (t.date) dateSet.add(t.date); });
 
-      // Always include today's date if not already present
       const todayStr = getTodayISTDateString();
       dateSet.add(todayStr);
 
-      const logs: DatewiseLogSummary[] = Array.from(dateSet).map(date => {
-        const list = (allLists || []).find((l: any) => l.date === date);
-        const dayEligibilities = (allEligibilities || []).filter((e: any) => e.date === date);
-        const dayTokens = (allTokens || []).filter((t: any) => t.date === date);
+      const currentSession = getMealSession();
 
-        const breakfastCount = dayTokens.filter((t: any) => (t.session || '').toLowerCase().includes('breakfast')).length;
-        const lunchCount = dayTokens.filter((t: any) => (t.session || '').toLowerCase().includes('lunch')).length;
-        const dinnerCount = dayTokens.filter((t: any) => (t.session || '').toLowerCase().includes('dinner')).length;
+      const logs: DatewiseLogSummary[] = Array.from(dateSet).map(date => {
+        const nextDate = getNextISTDateString(date);
+        const list = (allLists || []).find((l: any) => l.date === date);
+
+        // Eligible students who stayed overnight on Date D
+        const dayEligibilities = (allEligibilities || []).filter((e: any) => e.date === date);
+        const eligibleStudentIds = new Set(dayEligibilities.map((e: any) => e.studentId));
+
+        // 3-Meal Night-Stay Cycle Tokens:
+        // Meal 1: Dinner on Date D (night of stay) - strictly matched against eligible cohort
+        const dinnerTokens = (allTokens || []).filter((t: any) =>
+          t.date === date && (t.session || '').toUpperCase().includes('DINNER') && eligibleStudentIds.has(t.studentId)
+        );
+
+        // Meal 2: Breakfast on Date D+1 (morning after stay) - strictly matched against eligible cohort
+        const breakfastTokens = (allTokens || []).filter((t: any) =>
+          t.date === nextDate && (t.session || '').toUpperCase().includes('BREAKFAST') && eligibleStudentIds.has(t.studentId)
+        );
+
+        // Meal 3: Lunch on Date D+1 (afternoon after stay) - strictly matched against eligible cohort
+        const lunchTokens = (allTokens || []).filter((t: any) =>
+          t.date === nextDate && (t.session || '').toUpperCase().includes('LUNCH') && eligibleStudentIds.has(t.studentId)
+        );
 
         const totalEligible = dayEligibilities.length;
-        const totalTokensIssued = dayTokens.length;
+        const dinnerCount = Math.min(dinnerTokens.length, totalEligible);
+        const breakfastCount = Math.min(breakfastTokens.length, totalEligible);
+        const lunchCount = Math.min(lunchTokens.length, totalEligible);
+        const totalMealsServed = dinnerCount + breakfastCount + lunchCount;
+        const maxPossibleMeals = totalEligible * 3;
 
-        let turnoutPercentage = 0;
-        if (totalEligible > 0) {
-          turnoutPercentage = Math.min(100, Math.round((totalTokensIssued / totalEligible) * 100));
-        } else if (totalTokensIssued > 0) {
-          turnoutPercentage = 100;
+        const turnoutPercentage = maxPossibleMeals > 0
+          ? Math.min(100, Math.round((totalMealsServed / maxPossibleMeals) * 100))
+          : 0;
+
+        // Kitchen Service on Calendar Date D
+        const kitchenBreakfastCount = (allTokens || []).filter((t: any) =>
+          t.date === date && (t.session || '').toUpperCase().includes('BREAKFAST')
+        ).length;
+        const kitchenLunchCount = (allTokens || []).filter((t: any) =>
+          t.date === date && (t.session || '').toUpperCase().includes('LUNCH')
+        ).length;
+        const kitchenDinnerCount = (allTokens || []).filter((t: any) =>
+          t.date === date && (t.session || '').toUpperCase().includes('DINNER')
+        ).length;
+        const kitchenTotalPlates = kitchenBreakfastCount + kitchenLunchCount + kitchenDinnerCount;
+
+        // Cycle Status
+        let cycleStatus: 'Upcoming' | 'In Progress' | 'Completed' = 'Upcoming';
+        if (date > todayStr) {
+          cycleStatus = 'Upcoming';
+        } else if (date === todayStr) {
+          cycleStatus = 'In Progress';
+        } else if (nextDate === todayStr) {
+          cycleStatus = (currentSession === 'BREAKFAST' || currentSession === 'LUNCH')
+            ? 'In Progress'
+            : 'Completed';
+        } else {
+          cycleStatus = 'Completed';
         }
 
         return {
           date,
+          nextDate,
           status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+          cycleStatus,
           finalizedBy: list?.finalizedBy || null,
           finalizedAt: list?.finalizedAt ? new Date(list.finalizedAt).toLocaleString('en-IN') : null,
           totalEligible,
-          totalTokensIssued,
+          dinnerCount,
           breakfastCount,
           lunchCount,
-          dinnerCount,
+          totalMealsServed,
+          totalTokensIssued: totalMealsServed,
+          maxPossibleMeals,
           turnoutPercentage,
+          kitchenBreakfastCount,
+          kitchenLunchCount,
+          kitchenDinnerCount,
+          kitchenTotalPlates,
         };
       });
 
-      // Sort descending by date
+      // Sort descending by night-stay date
       return logs.sort((a, b) => b.date.localeCompare(a.date));
     } catch (error) {
       console.error('Error fetching datewise food logs:', error);
       return [];
     }
   }, ['foodlist', 'foodtokens']);
+}
+
+export async function getNightStayBatchAudit(dateInput: string): Promise<NightStayBatchAuditDetails | null> {
+  const date = dateInput;
+  const nextDate = getNextISTDateString(date);
+
+  return appCache.get(`batch_audit_${date}`, 20, async () => {
+    try {
+      const [list, eligibilities, dinnerTokens, nextDayTokens] = await Promise.all([
+        prisma.dailyFoodList.findUnique({ where: { date } }),
+        prisma.dailyFoodEligibility.findMany({
+          where: { date },
+          include: { student: true, project: true },
+          orderBy: { studentId: 'asc' },
+        }),
+        prisma.foodToken.findMany({
+          where: {
+            date,
+            session: { in: ['DINNER', 'Dinner', 'dinner'] },
+          },
+        }),
+        prisma.foodToken.findMany({
+          where: {
+            date: nextDate,
+            session: { in: ['BREAKFAST', 'Breakfast', 'breakfast', 'LUNCH', 'Lunch', 'lunch'] },
+          },
+        }),
+      ]);
+
+      if (!list && eligibilities.length === 0) return null;
+
+      const dinnerMap = new Map<string, any>();
+      dinnerTokens.forEach((t: any) => dinnerMap.set(t.studentId, t));
+
+      const breakfastMap = new Map<string, any>();
+      const lunchMap = new Map<string, any>();
+      nextDayTokens.forEach((t: any) => {
+        const sess = (t.session || '').toUpperCase();
+        if (sess.includes('BREAKFAST')) breakfastMap.set(t.studentId, t);
+        if (sess.includes('LUNCH')) lunchMap.set(t.studentId, t);
+      });
+
+      const students: StudentMealAudit[] = eligibilities.map((e: any) => {
+        const dToken = dinnerMap.get(e.studentId);
+        const bToken = breakfastMap.get(e.studentId);
+        const lToken = lunchMap.get(e.studentId);
+
+        let mealsClaimed = 0;
+        if (dToken) mealsClaimed++;
+        if (bToken) mealsClaimed++;
+        if (lToken) mealsClaimed++;
+
+        return {
+          studentId: e.studentId,
+          studentName: e.student?.name || e.studentId,
+          department: e.student?.department || '—',
+          year: e.student?.year || 1,
+          projectCode: e.projectCode || '—',
+          dinner: {
+            issued: Boolean(dToken),
+            tokenNumber: dToken?.tokenNumber,
+            time: dToken?.issuedAt ? formatISTTime(dToken.issuedAt) : undefined,
+          },
+          breakfast: {
+            issued: Boolean(bToken),
+            tokenNumber: bToken?.tokenNumber,
+            time: bToken?.issuedAt ? formatISTTime(bToken.issuedAt) : undefined,
+          },
+          lunch: {
+            issued: Boolean(lToken),
+            tokenNumber: lToken?.tokenNumber,
+            time: lToken?.issuedAt ? formatISTTime(lToken.issuedAt) : undefined,
+          },
+          mealsClaimed,
+        };
+      });
+
+      const todayStr = getTodayISTDateString();
+      const currentSession = getMealSession();
+      let cycleStatus = 'Upcoming';
+      if (date > todayStr) {
+        cycleStatus = 'Upcoming';
+      } else if (date === todayStr) {
+        cycleStatus = currentSession === 'DINNER' ? 'In Progress (Dinner Active)' : 'Upcoming (Tonight)';
+      } else if (nextDate === todayStr) {
+        if (currentSession === 'BREAKFAST') cycleStatus = 'In Progress (Breakfast Active)';
+        else if (currentSession === 'LUNCH') cycleStatus = 'In Progress (Lunch Active)';
+        else cycleStatus = 'Cycle Completed';
+      } else {
+        cycleStatus = 'Completed';
+      }
+
+      const totalEligible = eligibilities.length;
+      const dinnerCount = dinnerTokens.length;
+      const breakfastCount = breakfastMap.size;
+      const lunchCount = lunchMap.size;
+      const totalMealsServed = dinnerCount + breakfastCount + lunchCount;
+      const maxPossibleMeals = totalEligible * 3;
+      const turnoutPercentage = maxPossibleMeals > 0
+        ? Math.min(100, Math.round((totalMealsServed / maxPossibleMeals) * 100))
+        : 0;
+
+      return {
+        date,
+        nextDate,
+        status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+        cycleStatus,
+        totalEligible,
+        dinnerCount,
+        breakfastCount,
+        lunchCount,
+        totalMealsServed,
+        maxPossibleMeals,
+        turnoutPercentage,
+        students,
+      };
+    } catch (err) {
+      console.error('Error fetching night stay batch audit:', err);
+      return null;
+    }
+  });
 }
 

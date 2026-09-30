@@ -44,9 +44,9 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
 
   const printContent = (
     <div id="token-slip-printable" className="hidden print:block text-black bg-white font-mono p-2">
-      <div className="text-center font-bold text-sm uppercase tracking-wide border-b border-black pb-1 mb-2">
-        SRI SAIRAM ENGINEERING COLLEGE
-        <div className="text-[10px] font-normal tracking-normal text-slate-700">INCUBATION CENTRE - FOOD TOKEN</div>
+      <div className="text-center font-bold text-xs uppercase tracking-wide border-b border-black pb-1 mb-2">
+        SRI SAIRAM TECHNO INCUBATOR FOUNDATION
+        <div className="text-[10px] font-normal tracking-normal text-slate-700">FOOD TOKEN SYSTEM</div>
       </div>
 
       <div className="text-center my-2 border border-black p-2 rounded">

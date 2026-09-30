@@ -394,7 +394,7 @@ export interface DashboardBundleData {
 
 export async function getDashboardBundle(dateInput?: string): Promise<DashboardBundleData> {
   const date = dateInput || getTodayISTDateString();
-  return appCache.get(`dash_bundle_${date}`, 20, async () => {
+  return appCache.get(`dash_bundle_${date}`, 60, async () => {
     try {
       const [list, eligibilities, rawTokens, students, projects] = await Promise.all([
         prisma.dailyFoodList.findUnique({
@@ -410,16 +410,8 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
           include: { student: true, project: true },
           orderBy: { issuedAt: 'desc' },
         }),
-        prisma.student.findMany({
-          include: { projectMemberships: true },
-        }),
-        prisma.project.findMany({
-          include: {
-            members: {
-              include: { student: true },
-            },
-          },
-        }),
+        getStudents(),
+        getProjects(),
       ]);
 
       const session = getMealSession();
@@ -437,6 +429,7 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
               date: yesterdayStr,
               session: { in: ['DINNER', 'Dinner', 'dinner'] },
             },
+            select: { id: true, issuedAt: true },
             orderBy: { issuedAt: 'desc' },
           }),
         ]);

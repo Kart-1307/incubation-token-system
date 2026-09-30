@@ -88,20 +88,58 @@ export function getNextISTDateString(dateStr: string): string {
   return `${py}-${pm}-${pd}`;
 }
 
+export const SESSION_TIMINGS: Record<MealSession, string> = {
+  BREAKFAST: '07:30 AM – 10:00 AM IST',
+  LUNCH: '12:00 PM – 03:00 PM IST',
+  DINNER: '07:30 PM – 10:30 PM IST',
+};
+
 /**
  * Automatically determine meal session strictly based on Indian Standard Time (IST):
- * - Morning (00:00 to 11:59 AM IST): BREAKFAST
- * - Afternoon (12:00 PM to 04:59 PM IST): LUNCH
- * - Evening/Night (05:00 PM to 11:59 PM IST): DINNER
+ * - Morning (00:00 to 11:29 AM IST): BREAKFAST (serving 07:30 AM - 10:00 AM)
+ * - Afternoon (11:30 AM to 04:29 PM IST): LUNCH (serving 12:00 PM - 03:00 PM)
+ * - Evening/Night (04:30 PM to 11:59 PM IST): DINNER (serving 07:30 PM - 10:30 PM)
  */
 export function getMealSession(dateInput?: Date | string | number | null): MealSession {
-  const { hours } = getISTDateParts(dateInput);
-  if (hours < 12) {
+  const { hours, minutes } = getISTDateParts(dateInput);
+  const totalMinutes = hours * 60 + minutes;
+
+  // 11:30 AM = 690 minutes
+  // 04:30 PM = 990 minutes
+  if (totalMinutes < 690) {
     return 'BREAKFAST';
-  } else if (hours < 17) {
+  } else if (totalMinutes < 990) {
     return 'LUNCH';
   } else {
     return 'DINNER';
+  }
+}
+
+/**
+ * Get active/upcoming/completed status and human-readable timing label for each meal session.
+ */
+export function getSessionStatus(session: MealSession, dateInput?: Date | string | number | null): {
+  status: 'ACTIVE' | 'COMPLETED' | 'UPCOMING';
+  statusLabel: string;
+} {
+  const { hours, minutes } = getISTDateParts(dateInput);
+  const totalMinutes = hours * 60 + minutes;
+
+  // Breakfast: Service 07:30 AM (450m) - 10:00 AM (600m), active buffer up to 10:45 AM (645m)
+  // Lunch: Service 12:00 PM (720m) - 03:00 PM (900m), active buffer up to 03:30 PM (930m)
+  // Dinner: Service 07:30 PM (1170m) - 10:30 PM (1350m), active buffer up to 11:00 PM (1380m)
+  if (session === 'BREAKFAST') {
+    if (totalMinutes < 420) return { status: 'UPCOMING', statusLabel: 'Opens 07:30 AM' };
+    if (totalMinutes <= 645) return { status: 'ACTIVE', statusLabel: 'Active Now' };
+    return { status: 'COMPLETED', statusLabel: 'Completed' };
+  } else if (session === 'LUNCH') {
+    if (totalMinutes < 690) return { status: 'UPCOMING', statusLabel: 'Opens 12:00 PM' };
+    if (totalMinutes <= 930) return { status: 'ACTIVE', statusLabel: 'Active Now' };
+    return { status: 'COMPLETED', statusLabel: 'Completed' };
+  } else {
+    if (totalMinutes < 1140) return { status: 'UPCOMING', statusLabel: 'Opens 07:30 PM' };
+    if (totalMinutes <= 1380) return { status: 'ACTIVE', statusLabel: 'Active Now' };
+    return { status: 'COMPLETED', statusLabel: 'Completed' };
   }
 }
 
