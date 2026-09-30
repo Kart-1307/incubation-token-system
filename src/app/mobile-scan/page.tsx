@@ -294,9 +294,9 @@ function MobileScanContent() {
     setStatusMessage('Starting camera stream...');
 
     try {
-      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      if (typeof window !== 'undefined' && window.isSecureContext === false && !navigator?.mediaDevices) {
         setStatus('error');
-        setStatusMessage('Insecure Context: Camera requires HTTPS or localhost.');
+        setStatusMessage('HTTP Origin: Mobile browsers block camera on plain HTTP. Run "npm run tunnel" for HTTPS camera, or type Roll ID below to test.');
         setCameraStarting(false);
         return;
       }

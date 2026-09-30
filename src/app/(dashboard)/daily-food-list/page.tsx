@@ -91,15 +91,39 @@ function DailyFoodListContent() {
   const [showLetterModal, setShowLetterModal] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
 
-  // Phone connection state
+  // Phone connection & tunnel state
   const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
     if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       return window.location.origin;
     }
     return 'https://sairam-incubation.loca.lt';
   });
+  const [tunnelStatusData, setTunnelStatusData] = useState<{
+    activeUrl: string;
+    tunnelUrl: string;
+    localIpUrl: string | null;
+    tunnelActive: boolean;
+  }>({
+    activeUrl: 'https://sairam-incubation.loca.lt',
+    tunnelUrl: 'https://sairam-incubation.loca.lt',
+    localIpUrl: null,
+    tunnelActive: false,
+  });
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState('');
   const [liveSyncConnected, setLiveSyncConnected] = useState(false);
+
+  // Client-side cache across dates for 0ms instant switching
+  const dateCacheRef = useRef<Map<string, FoodListDetails>>(new Map());
+  const selectedDateRef = useRef<string>(selectedDate);
+  const currentCountRef = useRef<number>(currentList?.entries.length || 0);
+
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
+  useEffect(() => {
+    currentCountRef.current = currentList?.entries.length || 0;
+  }, [currentList]);
 
   const [searchId, setSearchId] = useState('');
   const [foundStudent, setFoundStudent] = useState<StudentRecord | null | 'not-found'>(null);
@@ -171,30 +195,45 @@ function DailyFoodListContent() {
     router.replace(query ? `?${query}` : window.location.pathname, { scroll: false });
   };
 
-  // Load Daily Food List and Tokens data in a single fast bundle
-  const loadData = useCallback(async (date: string, isBackground = false) => {
-    if (!isBackground) setLoading(true);
-    try {
-      const bundle = await getDashboardBundle(date);
-      setCurrentList(bundle.foodList);
-      setStudentRegistry(bundle.students);
-      setProjectRegistry(bundle.projects);
-      setTokens(bundle.tokens);
+  // Load master student & project registries ONCE on mount
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([getStudents(), getProjects()])
+      .then(([students, projects]) => {
+        if (isMounted) {
+          setStudentRegistry(students);
+          setProjectRegistry(projects);
+        }
+      })
+      .catch(err => console.error('Registry load error:', err));
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
-      const payload: CachedDailyFoodListPayload = {
-        date,
-        list: bundle.foodList,
-        students: bundle.students,
-        projects: bundle.projects,
-        tokens: bundle.tokens,
-        timestamp: Date.now(),
-      };
-      memoryFoodListCache = payload;
+  // Lightning-fast food list loader (<30ms, or 0ms from client cache)
+  const loadData = useCallback(async (date: string, isBackground = false) => {
+    const cached = dateCacheRef.current.get(date);
+    if (cached) {
+      setCurrentList(cached);
+      if (!isBackground) setLoading(false);
+    } else if (!isBackground) {
+      setLoading(true);
+    }
+
+    try {
+      const list = await getDailyFoodList(date);
+      dateCacheRef.current.set(date, list);
+      if (selectedDateRef.current === date) {
+        setCurrentList(list);
+      }
     } catch (e) {
       console.error(e);
-      showToast('Failed to load food list data from server.');
+      if (!isBackground) {
+        showToast('Failed to load food list data from server.');
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }, []);
 
@@ -259,34 +298,24 @@ function DailyFoodListContent() {
     }
   }, [activeTab, loadLogs]);
 
-  // Load and save phone scanner URL for QR code generator (auto-detects deployed live origin)
+  // Load and save phone scanner URL for QR code generator (auto-detects deployed live origin & local IP)
   useEffect(() => {
     fetch('/api/tunnel-status')
       .then(res => res.json())
       .then(data => {
-        if (data.success && data.url) {
-          setTunnelUrlInput(data.url);
-        } else if (typeof window !== 'undefined') {
-          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-          const saved = localStorage.getItem('last_mobile_scanner_url');
-          if (isDeployed) {
-            setTunnelUrlInput(window.location.origin);
-          } else if (saved && !saved.includes('sairam-incubation.loca.lt')) {
-            setTunnelUrlInput(saved);
+        if (data.success) {
+          setTunnelStatusData({
+            activeUrl: data.url || 'https://sairam-incubation.loca.lt',
+            tunnelUrl: data.tunnelUrl || 'https://sairam-incubation.loca.lt',
+            localIpUrl: data.localIpUrl || null,
+            tunnelActive: !!data.tunnelActive,
+          });
+          if (data.url) {
+            setTunnelUrlInput(data.url);
           }
         }
       })
-      .catch(() => {
-        if (typeof window !== 'undefined') {
-          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-          if (isDeployed) {
-            setTunnelUrlInput(window.location.origin);
-          } else {
-            const saved = localStorage.getItem('last_mobile_scanner_url');
-            if (saved) setTunnelUrlInput(saved);
-          }
-        }
-      });
+      .catch(() => {});
   }, [showPhoneModal]);
 
   useEffect(() => {
@@ -307,9 +336,12 @@ function DailyFoodListContent() {
     }
   }, [tunnelUrlInput, selectedDate]);
 
-  // Real-time Server-Sent Events listener for phone scans and token generation
+  // Real-time Server-Sent Events listener + Adaptive 2-second Micro-Poll
   useEffect(() => {
     let eventSource: EventSource | null = null;
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    // 1. Permanent SSE Connection (no teardown on date/tab change)
     try {
       eventSource = new EventSource('/api/terminal-stream');
       eventSource.addEventListener('connected', () => setLiveSyncConnected(true));
@@ -319,41 +351,43 @@ function DailyFoodListContent() {
         try {
           const payload = JSON.parse(e.data);
 
-          // Real-time notification when a phone adds student to Food List
           if (payload.type === 'FOOD_LIST_ADDED') {
-            const entryDate = payload.date || selectedDate;
-            if (entryDate === selectedDate) {
-              // 1. Optimistic instant local state update (<10ms UI reflection!)
+            const entryDate = payload.date || selectedDateRef.current;
+            if (entryDate === selectedDateRef.current) {
+              // 1. Safe optimistic instant local state update (<10ms UI reflection)
               setCurrentList(prev => {
-                if (!prev) return prev;
-                if (prev.entries.some(e => e.studentId === payload.studentId)) return prev;
+                const existing = prev?.entries || [];
+                if (existing.some(item => item.studentId === payload.studentId)) return prev;
                 const newEntry = {
                   studentId: payload.studentId,
                   studentName: payload.studentName || payload.studentId,
                   department: payload.department || '—',
-                  year: payload.year || 0,
+                  year: Number(payload.year) || 0,
                   projectCode: payload.project || 'INC-GENERAL',
                   projectName: payload.project || 'Incubation Team',
-                  addedBy: 'Mobile Scanner',
+                  addedBy: payload.addedBy || 'Mobile Scanner',
                   status: 'Eligible',
                 };
-                return {
-                  ...prev,
-                  entries: [newEntry, ...prev.entries],
+                const updated: FoodListDetails = {
+                  date: entryDate,
+                  status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
+                  finalizedBy: prev?.finalizedBy || null,
+                  finalizedAt: prev?.finalizedAt || null,
+                  entries: [newEntry, ...existing],
                 };
+                dateCacheRef.current.set(entryDate, updated);
+                return updated;
               });
 
-              memoryFoodListCache = null;
-              loadData(selectedDate, true);
               playChime('success');
-              showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(selectedDate)} Food List!`);
+              showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(entryDate)} Food List!`);
             } else {
               showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(payload.date)} List!`);
             }
           } else if (payload.type === 'FOOD_LIST_DUPLICATE') {
-            showToast(`📲 Phone Scan: ${payload.studentName || payload.studentId} is already on ${formatISTDateDMY(payload.date || selectedDate)} list.`);
+            showToast(`📲 Phone Scan: ${payload.studentName || payload.studentId} is already on ${formatISTDateDMY(payload.date || selectedDateRef.current)} list.`);
           } else if (payload.type === 'TOKEN_ISSUED') {
-            loadTokens(activeTab === 'tokens' ? tokenDateFilter : selectedDate);
+            loadTokens(selectedDateRef.current);
           }
         } catch {}
       };
@@ -361,10 +395,45 @@ function DailyFoodListContent() {
       eventSource.onerror = () => setLiveSyncConnected(false);
     } catch {}
 
+    // 2. Infallible Adaptive 2-second Micro-Poll
+    pollInterval = setInterval(async () => {
+      if (document.hidden) return;
+      const targetDate = selectedDateRef.current;
+      const knownCount = currentCountRef.current;
+
+      try {
+        const res = await fetch(`/api/food-list-sync?date=${targetDate}&knownCount=${knownCount}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.changed && data.entries) {
+          if (data.count > knownCount && knownCount > 0) {
+            playChime('success');
+            showToast(`📲 Food List updated: ${data.count} students approved.`);
+          }
+
+          const updated: FoodListDetails = {
+            date: targetDate,
+            status: data.status || 'Draft',
+            finalizedBy: data.finalizedBy || null,
+            finalizedAt: data.finalizedAt || null,
+            entries: data.entries,
+          };
+
+          dateCacheRef.current.set(targetDate, updated);
+          if (selectedDateRef.current === targetDate) {
+            setCurrentList(updated);
+          }
+          setLiveSyncConnected(true);
+        }
+      } catch {}
+    }, 2000);
+
     return () => {
       if (eventSource) eventSource.close();
+      if (pollInterval) clearInterval(pollInterval);
     };
-  }, [selectedDate, activeTab, tokenDateFilter, loadData, loadTokens, playChime]);
+  }, [playChime, loadTokens]);
 
   // Process Quick Scan (Zero-token guarantee)
   const processQuickScan = useCallback(
@@ -374,10 +443,10 @@ function DailyFoodListContent() {
 
       const res = await scanStudentIntoDailyFoodList(code, selectedDate, 'Barcode Gun');
       if (res.success) {
-        // Optimistic instant state update
+        // Safe optimistic instant state update
         setCurrentList(prev => {
-          if (!prev) return prev;
-          if (prev.entries.some(e => e.studentId === code)) return prev;
+          const existing = prev?.entries || [];
+          if (existing.some(e => e.studentId === code)) return prev;
           const newEntry = {
             studentId: code,
             studentName: res.student?.name || code,
@@ -388,16 +457,19 @@ function DailyFoodListContent() {
             addedBy: 'Barcode Gun',
             status: 'Eligible',
           };
-          return {
-            ...prev,
-            entries: [newEntry, ...prev.entries],
+          const updated: FoodListDetails = {
+            date: selectedDate,
+            status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
+            finalizedBy: prev?.finalizedBy || null,
+            finalizedAt: prev?.finalizedAt || null,
+            entries: [newEntry, ...existing],
           };
+          dateCacheRef.current.set(selectedDate, updated);
+          return updated;
         });
 
-        memoryFoodListCache = null;
         playChime('success');
         showToast(`✅ ${res.student?.name || code} added to Food List! (Zero tokens issued)`);
-        await loadData(selectedDate, true);
       } else if (res.alreadyAdded) {
         playChime('warning');
         showToast(`ℹ️ ${res.student?.name || code} is already on today's food list.`);
@@ -406,7 +478,7 @@ function DailyFoodListContent() {
         showToast(`❌ ${res.message}`);
       }
     },
-    [selectedDate, loadData, playChime]
+    [selectedDate, playChime]
   );
 
   // Global USB / Bluetooth Barcode Gun Scanner Listener
@@ -641,6 +713,11 @@ function DailyFoodListContent() {
             </div>
 
             <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-sky-200 rounded-lg text-[11px] font-semibold text-slate-700 shadow-2xs">
+                <span className={`w-2 h-2 rounded-full ${liveSyncConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+                <span>{liveSyncConnected ? 'Live Sync Active' : 'Connecting Sync...'}</span>
+              </div>
+
               <button
                 onClick={() => setShowPhoneModal(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
@@ -1418,6 +1495,44 @@ function DailyFoodListContent() {
               </div>
             </div>
 
+            {/* Network Selector Tabs */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setTunnelUrlInput(tunnelStatusData.tunnelUrl)}
+                className={`py-2 px-3 rounded-xl border font-bold text-center transition-all cursor-pointer ${
+                  tunnelUrlInput.includes('loca.lt')
+                    ? 'bg-sky-600 text-white border-sky-500 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <div>☁️ HTTPS Tunnel</div>
+                <div className="text-[10px] font-normal opacity-90">
+                  {tunnelStatusData.tunnelActive ? '🟢 Online (Camera OK)' : '⚠️ Offline (Run npm run tunnel)'}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                disabled={!tunnelStatusData.localIpUrl}
+                onClick={() => {
+                  if (tunnelStatusData.localIpUrl) {
+                    setTunnelUrlInput(tunnelStatusData.localIpUrl);
+                  }
+                }}
+                className={`py-2 px-3 rounded-xl border font-bold text-center transition-all cursor-pointer ${
+                  !tunnelUrlInput.includes('loca.lt') && tunnelStatusData.localIpUrl
+                    ? 'bg-sky-600 text-white border-sky-500 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 disabled:opacity-50'
+                }`}
+              >
+                <div>📶 Local Wi-Fi IP</div>
+                <div className="text-[10px] font-normal opacity-90">
+                  {tunnelStatusData.localIpUrl ? tunnelStatusData.localIpUrl.replace('http://', '') : 'Unavailable'}
+                </div>
+              </button>
+            </div>
+
             {/* Tunnel URL config */}
             <div className="space-y-1.5 text-xs">
               <label className="font-semibold text-slate-700 block">Mobile Web URL:</label>
@@ -1428,7 +1543,15 @@ function DailyFoodListContent() {
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
               <p className="text-[11px] text-slate-500">
-                Scanned students from this phone will be added to the <strong>{formatISTDateDMY(selectedDate)}</strong> food list.
+                {tunnelUrlInput.includes('loca.lt') ? (
+                  <span>
+                    📱 <strong>Camera Anywhere:</strong> Opens over HTTPS. (If offline, run <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px] font-mono">npm run tunnel</code> in terminal).
+                  </span>
+                ) : (
+                  <span>
+                    📶 <strong>Local Wi-Fi Testing:</strong> Ensure phone is on the same Wi-Fi. (Mobile browsers block camera over plain HTTP; use the Roll ID bar on phone to test).
+                  </span>
+                )}
               </p>
             </div>
 
