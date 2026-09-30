@@ -46,10 +46,14 @@ export default function ScanToken() {
   const [showPhoneQrModal, setShowPhoneQrModal] = useState<boolean>(false);
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string>('');
   const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('last_mobile_scanner_url');
+      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
+        return saved;
+      }
       return window.location.origin;
     }
-    return 'https://sairam-incubation.loca.lt';
+    return '';
   });
   const [copiedAlert, setCopiedAlert] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,34 +66,16 @@ export default function ScanToken() {
     generatedTokenRef.current = generatedToken;
   }, [state, generatedToken]);
 
-  // Initialize and persist mobile scanner URL (auto-detects deployed live origin)
+  // Initialize and persist mobile scanner URL (clean origin)
   useEffect(() => {
-    fetch('/api/tunnel-status')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.url) {
-          setTunnelUrlInput(data.url);
-        } else if (typeof window !== 'undefined') {
-          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-          const saved = localStorage.getItem('last_mobile_scanner_url');
-          if (isDeployed) {
-            setTunnelUrlInput(window.location.origin);
-          } else if (saved && !saved.includes('sairam-incubation.loca.lt')) {
-            setTunnelUrlInput(saved);
-          }
-        }
-      })
-      .catch(() => {
-        if (typeof window !== 'undefined') {
-          const isDeployed = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-          if (isDeployed) {
-            setTunnelUrlInput(window.location.origin);
-          } else {
-            const saved = localStorage.getItem('last_mobile_scanner_url');
-            if (saved) setTunnelUrlInput(saved);
-          }
-        }
-      });
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('last_mobile_scanner_url');
+      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
+        setTunnelUrlInput(saved);
+      } else {
+        setTunnelUrlInput(window.location.origin);
+      }
+    }
   }, [showPhoneQrModal]);
 
   // Generate dynamic QR code whenever tunnel/host URL changes
@@ -1093,48 +1079,35 @@ export default function ScanToken() {
                 <span>Open default camera on phone & tap link</span>
               </div>
 
-              {/* Tunnel URL config field */}
+              {/* Mobile Scanner URL & Copy Link */}
               <div className="w-full mt-4 text-left">
                 <label className="text-[11px] font-semibold text-slate-500 block mb-1">
-                  Target Tunnel / Server URL:
+                  Mobile Scanner Link:
                 </label>
                 <div className="flex gap-1.5">
                   <input
-                    value={tunnelUrlInput}
-                    onChange={e => setTunnelUrlInput(e.target.value)}
-                    placeholder="https://xxxx.loca.lt"
-                    className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={(() => {
+                      const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
+                      return `${clean}/mobile-scan`;
+                    })()}
+                    readOnly
+                    onClick={e => (e.target as HTMLInputElement).select()}
+                    className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono bg-slate-50 text-slate-700 select-all focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                   <button
+                    type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(`${tunnelUrlInput.replace(/\/$/, '')}/mobile-scan`);
-                      setCopiedAlert('URL Copied!');
+                      const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
+                      navigator.clipboard.writeText(`${clean}/mobile-scan`);
+                      setCopiedAlert('Link Copied!');
                       setTimeout(() => setCopiedAlert(''), 2500);
                     }}
-                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-2xs"
                     title="Copy full mobile-scan URL"
                   >
-                    Copy
+                    Copy Link
                   </button>
                 </div>
-              </div>
-
-              {/* Localtunnel IP Password helper */}
-              <div className="w-full mt-3 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-center justify-between">
-                <div>
-                  <span className="font-bold block">Tunnel Password (if asked):</span>
-                  <span className="font-mono font-bold text-amber-950">49.43.248.107</span>
-                </div>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText('49.43.248.107');
-                    setCopiedAlert('Password Copied!');
-                    setTimeout(() => setCopiedAlert(''), 2500);
-                  }}
-                  className="px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-semibold rounded text-[10px] transition-colors cursor-pointer"
-                >
-                  Copy IP
-                </button>
               </div>
 
               {copiedAlert && (

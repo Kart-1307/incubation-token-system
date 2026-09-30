@@ -34,52 +34,50 @@ export interface FoodListDetails {
 export async function getDailyFoodList(dateInput?: string): Promise<FoodListDetails> {
   const date = dateInput || getTodayISTDateString();
 
-  return appCache.get(`foodlist_${date}`, 30, async () => {
-    try {
-      // Parallelize queries across database roundtrips
-      const [list, eligibilities] = await Promise.all([
-        prisma.dailyFoodList.findUnique({
-          where: { date },
-          include: { entries: true },
-        }),
-        prisma.dailyFoodEligibility.findMany({
-          where: { date },
-          include: {
-            student: true,
-            project: true,
-          },
-        }),
-      ]);
+  try {
+    const [list, eligibilities] = await Promise.all([
+      prisma.dailyFoodList.findUnique({
+        where: { date },
+        select: { status: true, finalizedBy: true, finalizedAt: true },
+      }),
+      prisma.dailyFoodEligibility.findMany({
+        where: { date },
+        include: {
+          student: true,
+          project: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
-      const entries: FoodListEntry[] = eligibilities.map((e: any) => ({
-        studentId: e.studentId,
-        studentName: e.student?.name || e.studentId,
-        department: normalizeDepartmentName(e.student?.department),
-        year: e.student?.year || 0,
-        projectCode: e.projectCode,
-        projectName: e.project?.name || e.projectCode,
-        addedBy: e.addedBy || 'Staff',
-        status: e.status || 'Eligible',
-      }));
+    const entries: FoodListEntry[] = eligibilities.map((e: any) => ({
+      studentId: e.studentId,
+      studentName: e.student?.name || e.studentId,
+      department: normalizeDepartmentName(e.student?.department),
+      year: e.student?.year || 0,
+      projectCode: e.projectCode,
+      projectName: e.project?.name || e.projectCode,
+      addedBy: e.addedBy || 'Staff',
+      status: e.status || 'Eligible',
+    }));
 
-      return {
-        date,
-        status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
-        finalizedBy: list?.finalizedBy || null,
-        finalizedAt: list?.finalizedAt instanceof Date
-          ? list.finalizedAt.toLocaleString('en-IN')
-          : (list?.finalizedAt ? String(list.finalizedAt) : null),
-        entries,
-      };
-    } catch (error) {
-      console.error('Error fetching daily food list:', error);
-      return {
-        date,
-        status: 'Draft',
-        entries: [],
-      };
-    }
-  }, ['foodlist']);
+    return {
+      date,
+      status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+      finalizedBy: list?.finalizedBy || null,
+      finalizedAt: list?.finalizedAt instanceof Date
+        ? list.finalizedAt.toLocaleString('en-IN')
+        : (list?.finalizedAt ? String(list.finalizedAt) : null),
+      entries,
+    };
+  } catch (error) {
+    console.error('Error fetching daily food list:', error);
+    return {
+      date,
+      status: 'Draft',
+      entries: [],
+    };
+  }
 }
 
 export async function scanStudentIntoDailyFoodList(

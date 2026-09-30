@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Badge from '@/components/Badge';
 import FoodRequestLetterModal from '@/components/FoodRequestLetterModal';
@@ -33,7 +33,93 @@ interface CachedDailyFoodListPayload {
   timestamp: number;
 }
 
-let memoryFoodListCache: CachedDailyFoodListPayload | null = null;
+// Module-level in-memory cache that persists across Next.js client-side route transitions
+const globalDateCache = new Map<string, FoodListDetails>();
+let globalStudentsCache: StudentRecord[] = [];
+let globalProjectsCache: ProjectRecord[] = [];
+let globalTokensCache: any[] = [];
+
+function getInitialFoodListData(todayStr: string): {
+  list: FoodListDetails;
+  students: StudentRecord[];
+  projects: ProjectRecord[];
+  tokens: any[];
+} {
+  // 1. Check in-memory global cache (survives client-side page transitions in 0ms)
+  if (globalDateCache.has(todayStr)) {
+    return {
+      list: globalDateCache.get(todayStr)!,
+      students: globalStudentsCache,
+      projects: globalProjectsCache,
+      tokens: globalTokensCache,
+    };
+  }
+
+  // 2. Check sessionStorage for foodlist cache
+  if (typeof window !== 'undefined') {
+    try {
+      const storedFoodList = sessionStorage.getItem('incubation_foodlist_cache');
+      if (storedFoodList) {
+        const parsed = JSON.parse(storedFoodList);
+        if (parsed && parsed.date === todayStr && parsed.list) {
+          globalDateCache.set(todayStr, parsed.list);
+          if (parsed.students?.length) globalStudentsCache = parsed.students;
+          if (parsed.projects?.length) globalProjectsCache = parsed.projects;
+          if (parsed.tokens?.length) globalTokensCache = parsed.tokens;
+          return {
+            list: parsed.list,
+            students: globalStudentsCache,
+            projects: globalProjectsCache,
+            tokens: globalTokensCache,
+          };
+        }
+      }
+
+      // 3. Fallback to dashboard cache (if user was on dashboard, data is already ready!)
+      const storedDashboard = sessionStorage.getItem('incubation_dashboard_cache');
+      if (storedDashboard) {
+        const parsed = JSON.parse(storedDashboard);
+        if (parsed && parsed.date === todayStr) {
+          const list: FoodListDetails = parsed.foodList || {
+            date: todayStr,
+            status: 'Draft',
+            finalizedBy: null,
+            finalizedAt: null,
+            entries: [],
+          };
+          globalDateCache.set(todayStr, list);
+          if (parsed.students?.length) globalStudentsCache = parsed.students;
+          if (parsed.projects?.length) globalProjectsCache = parsed.projects;
+          if (parsed.tokens?.length) globalTokensCache = parsed.tokens;
+          return {
+            list,
+            students: globalStudentsCache,
+            projects: globalProjectsCache,
+            tokens: globalTokensCache,
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Session cache read error:', e);
+    }
+  }
+
+  // 4. Default instant empty draft (0ms load time, never block on spinner)
+  const defaultList: FoodListDetails = {
+    date: todayStr,
+    status: 'Draft',
+    finalizedBy: null,
+    finalizedAt: null,
+    entries: [],
+  };
+  globalDateCache.set(todayStr, defaultList);
+  return {
+    list: defaultList,
+    students: globalStudentsCache,
+    projects: globalProjectsCache,
+    tokens: globalTokensCache,
+  };
+}
 
 export default function DailyFoodListPage() {
   return (
@@ -55,7 +141,7 @@ function DailyFoodListContent() {
   const router = useRouter();
 
   const todayStr = getTodayISTDateString();
-  const initialCache = memoryFoodListCache && memoryFoodListCache.date === todayStr && Date.now() - memoryFoodListCache.timestamp < 1000 * 60 * 15 ? memoryFoodListCache : null;
+  const initialData = useMemo(() => getInitialFoodListData(todayStr), [todayStr]);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const tabParam = searchParams.get('tab');
@@ -65,13 +151,15 @@ function DailyFoodListContent() {
   });
 
   const [selectedDate, setSelectedDate] = useState(todayStr);
-  const [currentList, setCurrentList] = useState<FoodListDetails | null>(() => initialCache?.list ?? null);
-  const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
-  const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
-  const [loading, setLoading] = useState(() => !initialCache);
+  const [currentList, setCurrentList] = useState<FoodListDetails>(() => initialData.list);
+  const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialData.students);
+  const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialData.projects);
+  // Never show a blocking full-page loading spinner if initial shell exists!
+  const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Tokens state
-  const [tokens, setTokens] = useState<any[]>(() => initialCache?.tokens ?? []);
+  const [tokens, setTokens] = useState<any[]>(() => initialData.tokens);
   const [tokensLoading, setTokensLoading] = useState(false);
   const [tokenSearch, setTokenSearch] = useState('');
   const [tokenDateFilter, setTokenDateFilter] = useState(todayStr);
@@ -91,29 +179,21 @@ function DailyFoodListContent() {
   const [showLetterModal, setShowLetterModal] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
 
-  // Phone connection & tunnel state
+  // Phone connection & scanner URL state (clean origin, no localtunnel fallback)
   const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('last_mobile_scanner_url');
+      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
+        return saved;
+      }
       return window.location.origin;
     }
-    return 'https://sairam-incubation.loca.lt';
-  });
-  const [tunnelStatusData, setTunnelStatusData] = useState<{
-    activeUrl: string;
-    tunnelUrl: string;
-    localIpUrl: string | null;
-    tunnelActive: boolean;
-  }>({
-    activeUrl: 'https://sairam-incubation.loca.lt',
-    tunnelUrl: 'https://sairam-incubation.loca.lt',
-    localIpUrl: null,
-    tunnelActive: false,
+    return '';
   });
   const [phoneQrDataUrl, setPhoneQrDataUrl] = useState('');
   const [liveSyncConnected, setLiveSyncConnected] = useState(false);
+  const [copiedUrlAlert, setCopiedUrlAlert] = useState(false);
 
-  // Client-side cache across dates for 0ms instant switching
-  const dateCacheRef = useRef<Map<string, FoodListDetails>>(new Map());
   const selectedDateRef = useRef<string>(selectedDate);
   const currentCountRef = useRef<number>(currentList?.entries.length || 0);
 
@@ -195,17 +275,21 @@ function DailyFoodListContent() {
     router.replace(query ? `?${query}` : window.location.pathname, { scroll: false });
   };
 
-  // Load master student & project registries ONCE on mount
+  // Load master student & project registries ONCE on mount (cached in memory)
   useEffect(() => {
     let isMounted = true;
-    Promise.all([getStudents(), getProjects()])
-      .then(([students, projects]) => {
-        if (isMounted) {
-          setStudentRegistry(students);
-          setProjectRegistry(projects);
-        }
-      })
-      .catch(err => console.error('Registry load error:', err));
+    if (globalStudentsCache.length === 0 || globalProjectsCache.length === 0) {
+      Promise.all([getStudents(), getProjects()])
+        .then(([students, projects]) => {
+          if (isMounted) {
+            globalStudentsCache = students;
+            globalProjectsCache = projects;
+            setStudentRegistry(students);
+            setProjectRegistry(projects);
+          }
+        })
+        .catch(err => console.error('Registry load error:', err));
+    }
     return () => {
       isMounted = false;
     };
@@ -213,19 +297,42 @@ function DailyFoodListContent() {
 
   // Lightning-fast food list loader (<30ms, or 0ms from client cache)
   const loadData = useCallback(async (date: string, isBackground = false) => {
-    const cached = dateCacheRef.current.get(date);
+    const cached = globalDateCache.get(date);
     if (cached) {
-      setCurrentList(cached);
-      if (!isBackground) setLoading(false);
+      if (selectedDateRef.current === date) {
+        setCurrentList(cached);
+      }
+      isBackground = true;
     } else if (!isBackground) {
       setLoading(true);
     }
 
+    if (isBackground) {
+      setIsRefreshing(true);
+    }
+
     try {
       const list = await getDailyFoodList(date);
-      dateCacheRef.current.set(date, list);
+      globalDateCache.set(date, list);
       if (selectedDateRef.current === date) {
         setCurrentList(list);
+      }
+
+      // Persist to session storage
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem(
+            'incubation_foodlist_cache',
+            JSON.stringify({
+              date,
+              list,
+              students: globalStudentsCache,
+              projects: globalProjectsCache,
+              tokens: globalTokensCache,
+              timestamp: Date.now(),
+            })
+          );
+        } catch {}
       }
     } catch (e) {
       console.error(e);
@@ -233,7 +340,8 @@ function DailyFoodListContent() {
         showToast('Failed to load food list data from server.');
       }
     } finally {
-      if (!isBackground) setLoading(false);
+      setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
@@ -242,6 +350,7 @@ function DailyFoodListContent() {
     setTokensLoading(true);
     try {
       const data = await getFoodTokens(date || undefined);
+      globalTokensCache = data;
       setTokens(data);
     } catch (e) {
       console.error('Error fetching tokens:', e);
@@ -278,13 +387,18 @@ function DailyFoodListContent() {
     }
   }, []);
 
-  const initialLoadRef = useRef(false);
-
   useEffect(() => {
-    const isInitial = !initialLoadRef.current;
-    initialLoadRef.current = true;
-    loadData(selectedDate, isInitial && selectedDate === todayStr);
-  }, [selectedDate, loadData, todayStr]);
+    selectedDateRef.current = selectedDate;
+    const hasCached = globalDateCache.has(selectedDate);
+    if (hasCached) {
+      const cached = globalDateCache.get(selectedDate)!;
+      setCurrentList(cached);
+      setLoading(false);
+      loadData(selectedDate, true);
+    } else {
+      loadData(selectedDate, false);
+    }
+  }, [selectedDate, loadData]);
 
   useEffect(() => {
     if (activeTab === 'tokens') {
@@ -298,28 +412,21 @@ function DailyFoodListContent() {
     }
   }, [activeTab, loadLogs]);
 
-  // Load and save phone scanner URL for QR code generator (auto-detects deployed live origin & local IP)
+  // Sync mobile scanner URL to window.location.origin
   useEffect(() => {
-    fetch('/api/tunnel-status')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          setTunnelStatusData({
-            activeUrl: data.url || 'https://sairam-incubation.loca.lt',
-            tunnelUrl: data.tunnelUrl || 'https://sairam-incubation.loca.lt',
-            localIpUrl: data.localIpUrl || null,
-            tunnelActive: !!data.tunnelActive,
-          });
-          if (data.url) {
-            setTunnelUrlInput(data.url);
-          }
-        }
-      })
-      .catch(() => {});
-  }, [showPhoneModal]);
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('last_mobile_scanner_url');
+      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
+        setTunnelUrlInput(saved);
+      } else {
+        setTunnelUrlInput(window.location.origin);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    let clean = (tunnelUrlInput || '').trim();
+    const origin = tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '');
+    let clean = (origin || '').trim();
     if (!clean) return;
     if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
       clean = `https://${clean}`;
@@ -331,7 +438,7 @@ function DailyFoodListContent() {
       .then(url => setPhoneQrDataUrl(url))
       .catch(err => console.error('QR generation error:', err));
 
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !clean.includes('sairam-incubation.loca.lt') && !clean.includes('169.254')) {
       localStorage.setItem('last_mobile_scanner_url', clean);
     }
   }, [tunnelUrlInput, selectedDate]);
@@ -353,37 +460,52 @@ function DailyFoodListContent() {
 
           if (payload.type === 'FOOD_LIST_ADDED') {
             const entryDate = payload.date || selectedDateRef.current;
-            if (entryDate === selectedDateRef.current) {
-              // 1. Safe optimistic instant local state update (<10ms UI reflection)
-              setCurrentList(prev => {
-                const existing = prev?.entries || [];
-                if (existing.some(item => item.studentId === payload.studentId)) return prev;
-                const newEntry = {
-                  studentId: payload.studentId,
-                  studentName: payload.studentName || payload.studentId,
-                  department: payload.department || '—',
-                  year: Number(payload.year) || 0,
-                  projectCode: payload.project || 'INC-GENERAL',
-                  projectName: payload.project || 'Incubation Team',
-                  addedBy: payload.addedBy || 'Mobile Scanner',
-                  status: 'Eligible',
-                };
-                const updated: FoodListDetails = {
-                  date: entryDate,
-                  status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
-                  finalizedBy: prev?.finalizedBy || null,
-                  finalizedAt: prev?.finalizedAt || null,
-                  entries: [newEntry, ...existing],
-                };
-                dateCacheRef.current.set(entryDate, updated);
-                return updated;
-              });
+            const newEntry = {
+              studentId: payload.studentId,
+              studentName: payload.studentName || payload.studentId,
+              department: payload.department || '—',
+              year: Number(payload.year) || 0,
+              projectCode: payload.project || 'INC-GENERAL',
+              projectName: payload.project || 'Incubation Team',
+              addedBy: payload.addedBy || 'Mobile Scanner',
+              status: 'Eligible',
+            };
 
-              playChime('success');
-              showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(entryDate)} Food List!`);
-            } else {
-              showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(payload.date)} List!`);
+            // 1. Pre-update cache for entryDate so switching to it is 0ms instant
+            const existingCache = globalDateCache.get(entryDate);
+            const cachedEntries = existingCache?.entries || [];
+            if (!cachedEntries.some(item => item.studentId === payload.studentId)) {
+              globalDateCache.set(entryDate, {
+                date: entryDate,
+                status: existingCache?.status || 'Draft',
+                finalizedBy: existingCache?.finalizedBy || null,
+                finalizedAt: existingCache?.finalizedAt || null,
+                entries: [newEntry, ...cachedEntries],
+              });
             }
+
+            // 2. If phone scanned on a different date, auto-switch desktop view to that date so operator sees it immediately!
+            if (entryDate !== selectedDateRef.current) {
+              setSelectedDate(entryDate);
+              selectedDateRef.current = entryDate;
+            }
+
+            // 3. Immediately reflect in currentList
+            setCurrentList(prev => {
+              const existing = (prev && prev.date === entryDate) ? prev.entries : cachedEntries;
+              if (existing.some(item => item.studentId === payload.studentId)) return prev;
+              return {
+                date: entryDate,
+                status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
+                finalizedBy: prev?.finalizedBy || null,
+                finalizedAt: prev?.finalizedAt || null,
+                entries: [newEntry, ...existing],
+              };
+            });
+
+            setLoading(false);
+            playChime('success');
+            showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(entryDate)} Food List!`);
           } else if (payload.type === 'FOOD_LIST_DUPLICATE') {
             showToast(`📲 Phone Scan: ${payload.studentName || payload.studentId} is already on ${formatISTDateDMY(payload.date || selectedDateRef.current)} list.`);
           } else if (payload.type === 'TOKEN_ISSUED') {
@@ -420,9 +542,10 @@ function DailyFoodListContent() {
             entries: data.entries,
           };
 
-          dateCacheRef.current.set(targetDate, updated);
+          globalDateCache.set(targetDate, updated);
           if (selectedDateRef.current === targetDate) {
             setCurrentList(updated);
+            setLoading(false);
           }
           setLiveSyncConnected(true);
         }
@@ -464,7 +587,7 @@ function DailyFoodListContent() {
             finalizedAt: prev?.finalizedAt || null,
             entries: [newEntry, ...existing],
           };
-          dateCacheRef.current.set(selectedDate, updated);
+          globalDateCache.set(selectedDate, updated);
           return updated;
         });
 
@@ -738,16 +861,32 @@ function DailyFoodListContent() {
                 onChange={e => setSelectedDate(e.target.value)}
                 className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
               />
-              {selectedDate === todayStr && (
+              {selectedDate === todayStr ? (
                 <span className="px-2 py-0.5 text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
                   Today
                 </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(todayStr)}
+                  className="px-2 py-0.5 text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full transition-colors cursor-pointer"
+                  title="Jump to Today's Food List"
+                >
+                  Jump to Today
+                </button>
               )}
 
               <span className="px-2.5 py-0.5 text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full flex items-center gap-1.5 shadow-2xs">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>Open & Dynamic List</span>
               </span>
+
+              {isRefreshing && (
+                <span className="px-2 py-0.5 text-[11px] font-medium bg-slate-100 text-slate-500 rounded-full flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-ping"></span>
+                  <span>Syncing...</span>
+                </span>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1495,64 +1634,45 @@ function DailyFoodListContent() {
               </div>
             </div>
 
-            {/* Network Selector Tabs */}
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setTunnelUrlInput(tunnelStatusData.tunnelUrl)}
-                className={`py-2 px-3 rounded-xl border font-bold text-center transition-all cursor-pointer ${
-                  tunnelUrlInput.includes('loca.lt')
-                    ? 'bg-sky-600 text-white border-sky-500 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <div>☁️ HTTPS Tunnel</div>
-                <div className="text-[10px] font-normal opacity-90">
-                  {tunnelStatusData.tunnelActive ? '🟢 Online (Camera OK)' : '⚠️ Offline (Run npm run tunnel)'}
-                </div>
-              </button>
+            {/* Mobile Scanner URL & Copy Link */}
+            <div className="space-y-2 text-xs">
+              <label className="font-semibold text-slate-700 block">Mobile Scanner Link:</label>
+              <div className="flex gap-2">
+                <input
+                  value={(() => {
+                    const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
+                    return `${clean}/mobile-scan?mode=intake&date=${selectedDate}`;
+                  })()}
+                  readOnly
+                  onClick={e => (e.target as HTMLInputElement).select()}
+                  className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono bg-slate-50 text-slate-700 select-all focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
+                    const fullUrl = `${clean}/mobile-scan?mode=intake&date=${selectedDate}`;
+                    navigator.clipboard.writeText(fullUrl);
+                    setCopiedUrlAlert(true);
+                    setTimeout(() => setCopiedUrlAlert(false), 2500);
+                  }}
+                  className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors shadow-2xs"
+                >
+                  {copiedUrlAlert ? '✓ Copied!' : 'Copy Link'}
+                </button>
+              </div>
 
-              <button
-                type="button"
-                disabled={!tunnelStatusData.localIpUrl}
-                onClick={() => {
-                  if (tunnelStatusData.localIpUrl) {
-                    setTunnelUrlInput(tunnelStatusData.localIpUrl);
-                  }
-                }}
-                className={`py-2 px-3 rounded-xl border font-bold text-center transition-all cursor-pointer ${
-                  !tunnelUrlInput.includes('loca.lt') && tunnelStatusData.localIpUrl
-                    ? 'bg-sky-600 text-white border-sky-500 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 disabled:opacity-50'
-                }`}
-              >
-                <div>📶 Local Wi-Fi IP</div>
-                <div className="text-[10px] font-normal opacity-90">
-                  {tunnelStatusData.localIpUrl ? tunnelStatusData.localIpUrl.replace('http://', '') : 'Unavailable'}
-                </div>
-              </button>
-            </div>
-
-            {/* Tunnel URL config */}
-            <div className="space-y-1.5 text-xs">
-              <label className="font-semibold text-slate-700 block">Mobile Web URL:</label>
-              <input
-                value={tunnelUrlInput}
-                onChange={e => setTunnelUrlInput(e.target.value)}
-                placeholder="https://sairam-incubation.loca.lt"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
-              <p className="text-[11px] text-slate-500">
-                {tunnelUrlInput.includes('loca.lt') ? (
-                  <span>
-                    📱 <strong>Camera Anywhere:</strong> Opens over HTTPS. (If offline, run <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px] font-mono">npm run tunnel</code> in terminal).
-                  </span>
-                ) : (
-                  <span>
-                    📶 <strong>Local Wi-Fi Testing:</strong> Ensure phone is on the same Wi-Fi. (Mobile browsers block camera over plain HTTP; use the Roll ID bar on phone to test).
-                  </span>
-                )}
-              </p>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                <span>Point phone camera at QR code to scan barcodes.</span>
+                <a
+                  href={`${(tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '')}/mobile-scan?mode=intake&date=${selectedDate}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sky-600 hover:underline font-semibold"
+                >
+                  Open in browser ↗
+                </a>
+              </div>
             </div>
 
             <div className="pt-2 flex justify-end">
