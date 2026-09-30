@@ -265,11 +265,21 @@ export default function ScanToken() {
             setState('duplicate');
             playTerminalChime('warning');
           } else if (payload.type === 'INELIGIBLE') {
-            setMessage(payload.message);
+            setStudent({
+              id: payload.studentId,
+              name: payload.studentName || payload.studentId,
+              department: payload.department || '—',
+              year: payload.year || 0,
+              status: 'Active',
+            });
+            setScannedId(payload.studentId || '');
+            setProjectName(payload.project || 'Unassigned');
+            setMessage(payload.message || `Student not eligible for ${payload.session || currentMealSession}.`);
             setState('found-not-eligible');
             playTerminalChime('error');
           } else if (payload.type === 'NOT_FOUND') {
-            setMessage(payload.message);
+            setScannedId(payload.studentId || '');
+            setMessage(payload.message || `Student ID "${payload.studentId}" not found in institutional registry.`);
             setState('not-found');
             playTerminalChime('error');
           }
@@ -295,6 +305,16 @@ export default function ScanToken() {
   useEffect(() => {
     if (state === 'idle' || state === 'scanning') {
       inputRef.current?.focus();
+    }
+  }, [state]);
+
+  // Auto-reset alert states back to idle after 8 seconds so screen never gets stuck
+  useEffect(() => {
+    if (state === 'found-not-eligible' || state === 'not-found' || state === 'duplicate') {
+      const timer = setTimeout(() => {
+        reset();
+      }, 8000);
+      return () => clearTimeout(timer);
     }
   }, [state]);
 
@@ -763,7 +783,7 @@ export default function ScanToken() {
       )}
 
       {/* ELIGIBLE - PROMPT TO ISSUE TOKEN */}
-      {state === 'found-eligible' && student && (
+      {state === 'found-eligible' && (
         <div className="bg-white border border-emerald-200 rounded-xl shadow-xs overflow-hidden">
           <div className="bg-emerald-50 border-b border-emerald-100 p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 mx-auto flex items-center justify-center text-2xl font-bold mb-2">
@@ -776,19 +796,21 @@ export default function ScanToken() {
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-500">Student Name:</span>
-                <span className="font-bold text-slate-900">{student.name}</span>
+                <span className="font-bold text-slate-900">{student?.name || 'Eligible Student'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Student ID:</span>
-                <span className="font-bold font-mono text-indigo-700">{student.id}</span>
+                <span className="font-bold font-mono text-indigo-700">{student?.id || scannedId}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Department & Year:</span>
-                <span className="font-medium text-slate-800">{student.department} · Year {student.year}</span>
+                <span className="font-medium text-slate-800">
+                  {student?.department || '—'} {student?.year ? `· Year ${student.year}` : ''}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Incubation Project:</span>
-                <span className="font-medium text-slate-800">{projectName}</span>
+                <span className="font-medium text-slate-800">{projectName || 'Incubation Member'}</span>
               </div>
               <div className="flex justify-between pt-1 border-t border-slate-200">
                 <span className="text-slate-500">Meal Session:</span>
@@ -823,17 +845,17 @@ export default function ScanToken() {
       )}
 
       {/* TOKEN GENERATED SUCCESS */}
-      {state === 'token-generated' && generatedToken && (
+      {state === 'token-generated' && (
         <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden space-y-6 p-6">
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
             <div className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-1">
               Token Sequence Number
             </div>
             <div className="text-3xl font-black font-mono tracking-wider text-indigo-900 my-1">
-              {generatedToken.tokenNumber}
+              {generatedToken?.tokenNumber || 'ISSUED'}
             </div>
             <div className="text-xs font-medium text-slate-500 mt-1">
-              Issued at: <span className="font-bold text-slate-800">{formatISTTime(generatedToken.time)}</span> · Session: <span className="font-bold text-indigo-900 uppercase">{generatedToken.session || currentMealSession}</span>
+              Issued at: <span className="font-bold text-slate-800">{formatISTTime(generatedToken?.time)}</span> · Session: <span className="font-bold text-indigo-900 uppercase">{generatedToken?.session || currentMealSession}</span>
             </div>
           </div>
 
@@ -851,29 +873,29 @@ export default function ScanToken() {
 
               <div className="flex flex-col items-center justify-center my-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">TOKEN NUMBER</div>
-                <div className="text-xl font-black font-mono tracking-widest text-indigo-900">{generatedToken.tokenNumber}</div>
+                <div className="text-xl font-black font-mono tracking-widest text-indigo-900">{generatedToken?.tokenNumber || '—'}</div>
               </div>
 
               <div className="space-y-1.5 border-t border-b border-dashed border-slate-300 py-2.5 my-2 text-[11px]">
                 <div className="flex justify-between">
                   <span className="text-slate-500">STUDENT:</span>
-                  <span className="font-bold">{generatedToken.studentName}</span>
+                  <span className="font-bold">{generatedToken?.studentName || student?.name || 'Student'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">ID NO:</span>
-                  <span className="font-bold font-mono">{generatedToken.studentId}</span>
+                  <span className="font-bold font-mono">{generatedToken?.studentId || student?.id || scannedId}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">PROJECT:</span>
-                  <span>{generatedToken.project}</span>
+                  <span>{generatedToken?.project || projectName || 'Incubation Member'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">SESSION:</span>
-                  <span className="font-bold text-indigo-900 uppercase">{generatedToken.session || currentMealSession}</span>
+                  <span className="font-bold text-indigo-900 uppercase">{generatedToken?.session || currentMealSession}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">ISSUED:</span>
-                  <span>{formatISTTime(generatedToken.time)}</span>
+                  <span>{formatISTTime(generatedToken?.time)}</span>
                 </div>
               </div>
 
@@ -902,7 +924,7 @@ export default function ScanToken() {
       )}
 
       {/* NOT ELIGIBLE */}
-      {state === 'found-not-eligible' && student && (
+      {state === 'found-not-eligible' && (
         <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
           <div className="bg-rose-50 border-b border-rose-100 p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-700 mx-auto flex items-center justify-center text-2xl font-bold mb-2">
@@ -911,17 +933,21 @@ export default function ScanToken() {
             <h3 className="text-lg font-bold text-rose-800">Student Not Eligible</h3>
           </div>
           <div className="p-6 space-y-3 text-center">
-            <div className="font-bold text-slate-800">{student.name}</div>
-            <div className="text-sm text-slate-400 font-medium font-mono">{student.id} · {student.department}</div>
-            <p className="text-sm text-slate-500">
-              This student is not included in today's food eligibility list ({formatISTDateDMY(todayStr)}). No food token was issued.
+            <div className="font-bold text-slate-800">{student?.name || 'Student Ineligible'}</div>
+            <div className="text-sm text-slate-400 font-medium font-mono">
+              {student?.id || scannedId} {student?.department ? `· ${student.department}` : ''}
+            </div>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              {message || `This student is not included in today's food eligibility list (${formatISTDateDMY(todayStr)}). No food token was issued.`}
             </p>
-            <button
-              onClick={reset}
-              className="mt-4 bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-800 transition-colors cursor-pointer"
-            >
-              Scan Another Student
-            </button>
+            <div className="pt-2">
+              <button
+                onClick={reset}
+                className="bg-indigo-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-800 transition-colors cursor-pointer"
+              >
+                Scan Another Student
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1000,6 +1026,25 @@ export default function ScanToken() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* FAIL-SAFE FALLBACK CARD (Guarantees screen is never blank if in any unhandled state) */}
+      {!['idle', 'scanning', 'found-eligible', 'generating', 'token-generated', 'found-not-eligible', 'not-found', 'duplicate'].includes(state) && (
+        <div className="bg-white border border-slate-200 rounded-xl p-8 text-center shadow-xs space-y-3">
+          <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-600 mx-auto flex items-center justify-center text-2xl font-bold mb-2">
+            🔄
+          </div>
+          <div className="font-bold text-slate-800 text-base">Terminal Ready</div>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            Terminal state ready for next student verification.
+          </p>
+          <button
+            onClick={reset}
+            className="px-6 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-xs"
+          >
+            Reset Scanner
+          </button>
         </div>
       )}
 

@@ -321,8 +321,30 @@ function DailyFoodListContent() {
 
           // Real-time notification when a phone adds student to Food List
           if (payload.type === 'FOOD_LIST_ADDED') {
-            if (payload.date === selectedDate) {
-              loadData(selectedDate);
+            const entryDate = payload.date || selectedDate;
+            if (entryDate === selectedDate) {
+              // 1. Optimistic instant local state update (<10ms UI reflection!)
+              setCurrentList(prev => {
+                if (!prev) return prev;
+                if (prev.entries.some(e => e.studentId === payload.studentId)) return prev;
+                const newEntry = {
+                  studentId: payload.studentId,
+                  studentName: payload.studentName || payload.studentId,
+                  department: payload.department || '—',
+                  year: payload.year || 0,
+                  projectCode: payload.project || 'INC-GENERAL',
+                  projectName: payload.project || 'Incubation Team',
+                  addedBy: 'Mobile Scanner',
+                  status: 'Eligible',
+                };
+                return {
+                  ...prev,
+                  entries: [newEntry, ...prev.entries],
+                };
+              });
+
+              memoryFoodListCache = null;
+              loadData(selectedDate, true);
               playChime('success');
               showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(selectedDate)} Food List!`);
             } else {
@@ -352,9 +374,30 @@ function DailyFoodListContent() {
 
       const res = await scanStudentIntoDailyFoodList(code, selectedDate, 'Barcode Gun');
       if (res.success) {
+        // Optimistic instant state update
+        setCurrentList(prev => {
+          if (!prev) return prev;
+          if (prev.entries.some(e => e.studentId === code)) return prev;
+          const newEntry = {
+            studentId: code,
+            studentName: res.student?.name || code,
+            department: res.student?.department || '—',
+            year: res.student?.year || 0,
+            projectCode: res.project || 'INC-GENERAL',
+            projectName: res.project || 'Incubation Team',
+            addedBy: 'Barcode Gun',
+            status: 'Eligible',
+          };
+          return {
+            ...prev,
+            entries: [newEntry, ...prev.entries],
+          };
+        });
+
+        memoryFoodListCache = null;
         playChime('success');
         showToast(`✅ ${res.student?.name || code} added to Food List! (Zero tokens issued)`);
-        await loadData(selectedDate);
+        await loadData(selectedDate, true);
       } else if (res.alreadyAdded) {
         playChime('warning');
         showToast(`ℹ️ ${res.student?.name || code} is already on today's food list.`);

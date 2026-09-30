@@ -63,6 +63,17 @@ class FastCache {
   }
 
   /**
+   * Directly delete a specific cache key or all keys matching a prefix
+   */
+  invalidateKey(keyOrPrefix: string) {
+    for (const k of Array.from(this.store.keys())) {
+      if (k === keyOrPrefix || k.startsWith(keyOrPrefix)) {
+        this.store.delete(k);
+      }
+    }
+  }
+
+  /**
    * Clear entire cache
    */
   clear() {

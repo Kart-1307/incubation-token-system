@@ -177,6 +177,8 @@ export async function scanStudentIntoDailyFoodList(
     });
 
     appCache.invalidateTags(['foodlist', 'dashboard']);
+    appCache.invalidateKey(`dash_bundle_${date}`);
+    appCache.invalidateKey(`foodlist_${date}`);
     revalidatePath('/daily-food-list');
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
@@ -254,6 +256,8 @@ export async function addStudentToDailyList(
     });
 
     appCache.invalidateTags(['foodlist', 'dashboard']);
+    appCache.invalidateKey(`dash_bundle_${date}`);
+    appCache.invalidateKey(`foodlist_${date}`);
     revalidatePath('/daily-food-list');
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
@@ -302,6 +306,8 @@ export async function addBulkStudentsToDailyList(
     }
 
     appCache.invalidateTags(['foodlist', 'dashboard']);
+    appCache.invalidateKey(`dash_bundle_${date}`);
+    appCache.invalidateKey(`foodlist_${date}`);
     revalidatePath('/daily-food-list');
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
@@ -330,6 +336,8 @@ export async function removeStudentFromDailyList(
     });
 
     appCache.invalidateTags(['foodlist', 'dashboard']);
+    appCache.invalidateKey(`dash_bundle_${date}`);
+    appCache.invalidateKey(`foodlist_${date}`);
     revalidatePath('/daily-food-list');
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
@@ -368,6 +376,8 @@ export async function finalizeFoodList(
     });
 
     appCache.invalidateTags(['foodlist', 'dashboard']);
+    appCache.invalidateKey(`dash_bundle_${date}`);
+    appCache.invalidateKey(`foodlist_${date}`);
     revalidatePath('/daily-food-list');
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
