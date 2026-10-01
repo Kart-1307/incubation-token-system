@@ -175,16 +175,6 @@ export default function LoginClient() {
               <div className="pt-2 text-center text-xs text-slate-500">
                 Default Credentials: <span className="font-mono font-medium text-slate-700">staff / Sairam@123</span>
               </div>
-
-              <div className="mt-4 pt-4 border-t border-slate-100 text-center">
-                <a
-                  href="/mobile-scan"
-                  className="w-full inline-flex items-center justify-center gap-2 py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition-colors"
-                >
-                  <span>📱</span>
-                  <span>Open Mobile QR Scanner (No Login Required)</span>
-                </a>
-              </div>
             </form>
           ) : (
             /* Sign Up Form */

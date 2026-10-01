@@ -5,7 +5,6 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Badge from '@/components/Badge';
 import FoodRequestLetterModal from '@/components/FoodRequestLetterModal';
 import TokenPrintSlip from '@/components/TokenPrintSlip';
-import QRCode from 'qrcode';
 import {
   getDailyFoodList,
   addStudentToDailyList,
@@ -15,6 +14,7 @@ import {
   getNightStayBatchAudit,
   scanStudentIntoDailyFoodList,
   type FoodListDetails,
+  type FoodListEntry,
   type DatewiseLogSummary,
   type NightStayBatchAuditDetails,
 } from '@/actions/foodListActions';
@@ -39,16 +39,35 @@ let globalStudentsCache: StudentRecord[] = [];
 let globalProjectsCache: ProjectRecord[] = [];
 let globalTokensCache: any[] = [];
 
-function getInitialFoodListData(todayStr: string): {
+function getInitialWorkingDate(searchParams: { get: (k: string) => string | null }, todayStr: string): string {
+  // 1. Check URL query param ?date=YYYY-MM-DD
+  const dateParam = searchParams.get('date');
+  if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+    return dateParam;
+  }
+  // 2. Check sessionStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = sessionStorage.getItem('active_food_list_date');
+      if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) {
+        return saved;
+      }
+    } catch {}
+  }
+  // 3. Fallback to today
+  return todayStr;
+}
+
+function getInitialFoodListData(targetDate: string): {
   list: FoodListDetails;
   students: StudentRecord[];
   projects: ProjectRecord[];
   tokens: any[];
 } {
   // 1. Check in-memory global cache (survives client-side page transitions in 0ms)
-  if (globalDateCache.has(todayStr)) {
+  if (globalDateCache.has(targetDate)) {
     return {
-      list: globalDateCache.get(todayStr)!,
+      list: globalDateCache.get(targetDate)!,
       students: globalStudentsCache,
       projects: globalProjectsCache,
       tokens: globalTokensCache,
@@ -61,8 +80,8 @@ function getInitialFoodListData(todayStr: string): {
       const storedFoodList = sessionStorage.getItem('incubation_foodlist_cache');
       if (storedFoodList) {
         const parsed = JSON.parse(storedFoodList);
-        if (parsed && parsed.date === todayStr && parsed.list) {
-          globalDateCache.set(todayStr, parsed.list);
+        if (parsed && parsed.date === targetDate && parsed.list) {
+          globalDateCache.set(targetDate, parsed.list);
           if (parsed.students?.length) globalStudentsCache = parsed.students;
           if (parsed.projects?.length) globalProjectsCache = parsed.projects;
           if (parsed.tokens?.length) globalTokensCache = parsed.tokens;
@@ -79,15 +98,15 @@ function getInitialFoodListData(todayStr: string): {
       const storedDashboard = sessionStorage.getItem('incubation_dashboard_cache');
       if (storedDashboard) {
         const parsed = JSON.parse(storedDashboard);
-        if (parsed && parsed.date === todayStr) {
+        if (parsed && parsed.date === targetDate) {
           const list: FoodListDetails = parsed.foodList || {
-            date: todayStr,
+            date: targetDate,
             status: 'Draft',
             finalizedBy: null,
             finalizedAt: null,
             entries: [],
           };
-          globalDateCache.set(todayStr, list);
+          globalDateCache.set(targetDate, list);
           if (parsed.students?.length) globalStudentsCache = parsed.students;
           if (parsed.projects?.length) globalProjectsCache = parsed.projects;
           if (parsed.tokens?.length) globalTokensCache = parsed.tokens;
@@ -106,13 +125,13 @@ function getInitialFoodListData(todayStr: string): {
 
   // 4. Default instant empty draft (0ms load time, never block on spinner)
   const defaultList: FoodListDetails = {
-    date: todayStr,
+    date: targetDate,
     status: 'Draft',
     finalizedBy: null,
     finalizedAt: null,
     entries: [],
   };
-  globalDateCache.set(todayStr, defaultList);
+  globalDateCache.set(targetDate, defaultList);
   return {
     list: defaultList,
     students: globalStudentsCache,
@@ -140,8 +159,9 @@ function DailyFoodListContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const todayStr = getTodayISTDateString();
-  const initialData = useMemo(() => getInitialFoodListData(todayStr), [todayStr]);
+  const todayStr = useMemo(() => getTodayISTDateString(), []);
+  const initialDate = useMemo(() => getInitialWorkingDate(searchParams, todayStr), [searchParams, todayStr]);
+  const initialData = useMemo(() => getInitialFoodListData(initialDate), [initialDate]);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const tabParam = searchParams.get('tab');
@@ -150,7 +170,7 @@ function DailyFoodListContent() {
     return 'list';
   });
 
-  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [selectedDate, setSelectedDate] = useState<string>(initialDate);
   const [currentList, setCurrentList] = useState<FoodListDetails>(() => initialData.list);
   const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialData.students);
   const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialData.projects);
@@ -162,7 +182,7 @@ function DailyFoodListContent() {
   const [tokens, setTokens] = useState<any[]>(() => initialData.tokens);
   const [tokensLoading, setTokensLoading] = useState(false);
   const [tokenSearch, setTokenSearch] = useState('');
-  const [tokenDateFilter, setTokenDateFilter] = useState(todayStr);
+  const [tokenDateFilter, setTokenDateFilter] = useState<string>(initialDate);
   const [tokenSessionFilter, setTokenSessionFilter] = useState('ALL');
   const [selectedPrintToken, setSelectedPrintToken] = useState<any | null>(null);
 
@@ -177,26 +197,31 @@ function DailyFoodListContent() {
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [showLetterModal, setShowLetterModal] = useState(false);
-  const [showPhoneModal, setShowPhoneModal] = useState(false);
 
-  // Phone connection & scanner URL state (clean origin, auto-fallback to public production domain if on protected Vercel preview)
-  const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
+  // Dedicated Hardware Barcode Scanner State (<5ms instant UI)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('last_mobile_scanner_url');
-      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
-        return saved;
-      }
-      const hostname = window.location.hostname;
-      if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
-        return 'https://incubation-token-system-five.vercel.app';
-      }
-      return window.location.origin;
+      const saved = localStorage.getItem('incubation_scanner_sound');
+      return saved !== 'false';
     }
-    return '';
+    return true;
   });
-  const [phoneQrDataUrl, setPhoneQrDataUrl] = useState('');
-  const [liveSyncConnected, setLiveSyncConnected] = useState(false);
-  const [copiedUrlAlert, setCopiedUrlAlert] = useState(false);
+  const [lastScannedStudent, setLastScannedStudent] = useState<{
+    studentId: string;
+    studentName: string;
+    time: string;
+  } | null>(null);
+  const [highlightedStudentId, setHighlightedStudentId] = useState<string | null>(null);
+
+  const toggleSound = () => {
+    setSoundEnabled(prev => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('incubation_scanner_sound', String(next));
+      }
+      return next;
+    });
+  };
 
   const selectedDateRef = useRef<string>(selectedDate);
   const currentCountRef = useRef<number>(currentList?.entries.length || 0);
@@ -223,8 +248,9 @@ function DailyFoodListContent() {
     setTimeout(() => setToast(''), 4000);
   };
 
-  // Play subtle feedback chime
+  // Play subtle feedback chime (respects soundEnabled toggle)
   const playChime = useCallback((type: 'success' | 'warning' | 'error') => {
+    if (!soundEnabled) return;
     try {
       if (!audioCtxRef.current) {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -264,9 +290,9 @@ function DailyFoodListContent() {
         osc.stop(ctx.currentTime + 0.25);
       }
     } catch {}
-  }, []);
+  }, [soundEnabled]);
 
-  // Sync tab with URL
+  // Sync tab with URL while preserving selectedDate
   const switchTab = (tab: ActiveTab) => {
     setActiveTab(tab);
     const params = new URLSearchParams(window.location.search);
@@ -274,6 +300,9 @@ function DailyFoodListContent() {
       params.delete('tab');
     } else {
       params.set('tab', tab);
+    }
+    if (selectedDate && selectedDate !== todayStr) {
+      params.set('date', selectedDate);
     }
     const query = params.toString();
     router.replace(query ? `?${query}` : window.location.pathname, { scroll: false });
@@ -393,6 +422,28 @@ function DailyFoodListContent() {
 
   useEffect(() => {
     selectedDateRef.current = selectedDate;
+
+    // Persist active working date to sessionStorage
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('active_food_list_date', selectedDate);
+      } catch {}
+
+      // Synchronize browser URL query param without triggering full component remount
+      const params = new URLSearchParams(window.location.search);
+      if (selectedDate === todayStr) {
+        params.delete('date');
+      } else {
+        params.set('date', selectedDate);
+      }
+      const query = params.toString();
+      const newUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+      window.history.replaceState(null, '', newUrl);
+    }
+
+    // Automatically sync tokens subtab date filter to active working date
+    setTokenDateFilter(selectedDate);
+
     const hasCached = globalDateCache.has(selectedDate);
     if (hasCached) {
       const cached = globalDateCache.get(selectedDate)!;
@@ -402,7 +453,7 @@ function DailyFoodListContent() {
     } else {
       loadData(selectedDate, false);
     }
-  }, [selectedDate, loadData]);
+  }, [selectedDate, todayStr, loadData]);
 
   useEffect(() => {
     if (activeTab === 'tokens') {
@@ -416,118 +467,9 @@ function DailyFoodListContent() {
     }
   }, [activeTab, loadLogs]);
 
-  // Sync mobile scanner URL to public production domain or window.location.origin
+  // Adaptive 2-second Micro-Poll to sync multi-operator list updates in background
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('last_mobile_scanner_url');
-      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
-        setTunnelUrlInput(saved);
-      } else {
-        const hostname = window.location.hostname;
-        if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
-          setTunnelUrlInput('https://incubation-token-system-five.vercel.app');
-        } else {
-          setTunnelUrlInput(window.location.origin);
-        }
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    const origin = tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '');
-    let clean = (origin || '').trim();
-    if (!clean) return;
-    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-      clean = `https://${clean}`;
-    }
-    // Generate QR with explicit mode=intake and current selectedDate parameter
-    const baseUrl = clean.replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-    const target = `${baseUrl}/mobile-scan?mode=intake&date=${selectedDate}`;
-    QRCode.toDataURL(target, { width: 220, margin: 1, color: { dark: '#0369a1', light: '#ffffff' } })
-      .then(url => setPhoneQrDataUrl(url))
-      .catch(err => console.error('QR generation error:', err));
-
-    if (typeof window !== 'undefined' && !clean.includes('sairam-incubation.loca.lt') && !clean.includes('169.254')) {
-      localStorage.setItem('last_mobile_scanner_url', clean);
-    }
-  }, [tunnelUrlInput, selectedDate]);
-
-  // Real-time Server-Sent Events listener + Adaptive 2-second Micro-Poll
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    let pollInterval: NodeJS.Timeout | null = null;
-
-    // 1. Permanent SSE Connection (no teardown on date/tab change)
-    try {
-      eventSource = new EventSource('/api/terminal-stream');
-      eventSource.addEventListener('connected', () => setLiveSyncConnected(true));
-      eventSource.onopen = () => setLiveSyncConnected(true);
-
-      eventSource.onmessage = e => {
-        try {
-          const payload = JSON.parse(e.data);
-
-          if (payload.type === 'FOOD_LIST_ADDED') {
-            const entryDate = payload.date || selectedDateRef.current;
-            const newEntry = {
-              studentId: payload.studentId,
-              studentName: payload.studentName || payload.studentId,
-              department: payload.department || '—',
-              year: Number(payload.year) || 0,
-              projectCode: payload.project || 'INC-GENERAL',
-              projectName: payload.project || 'Incubation Team',
-              addedBy: payload.addedBy || 'Mobile Scanner',
-              status: 'Eligible',
-            };
-
-            // 1. Pre-update cache for entryDate so switching to it is 0ms instant
-            const existingCache = globalDateCache.get(entryDate);
-            const cachedEntries = existingCache?.entries || [];
-            if (!cachedEntries.some(item => item.studentId === payload.studentId)) {
-              globalDateCache.set(entryDate, {
-                date: entryDate,
-                status: existingCache?.status || 'Draft',
-                finalizedBy: existingCache?.finalizedBy || null,
-                finalizedAt: existingCache?.finalizedAt || null,
-                entries: [newEntry, ...cachedEntries],
-              });
-            }
-
-            // 2. If phone scanned on a different date, auto-switch desktop view to that date so operator sees it immediately!
-            if (entryDate !== selectedDateRef.current) {
-              setSelectedDate(entryDate);
-              selectedDateRef.current = entryDate;
-            }
-
-            // 3. Immediately reflect in currentList
-            setCurrentList(prev => {
-              const existing = (prev && prev.date === entryDate) ? prev.entries : cachedEntries;
-              if (existing.some(item => item.studentId === payload.studentId)) return prev;
-              return {
-                date: entryDate,
-                status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
-                finalizedBy: prev?.finalizedBy || null,
-                finalizedAt: prev?.finalizedAt || null,
-                entries: [newEntry, ...existing],
-              };
-            });
-
-            setLoading(false);
-            playChime('success');
-            showToast(`📲 Phone Scanned: ${payload.studentName || payload.studentId} added to ${formatISTDateDMY(entryDate)} Food List!`);
-          } else if (payload.type === 'FOOD_LIST_DUPLICATE') {
-            showToast(`📲 Phone Scan: ${payload.studentName || payload.studentId} is already on ${formatISTDateDMY(payload.date || selectedDateRef.current)} list.`);
-          } else if (payload.type === 'TOKEN_ISSUED') {
-            loadTokens(selectedDateRef.current);
-          }
-        } catch {}
-      };
-
-      eventSource.onerror = () => setLiveSyncConnected(false);
-    } catch {}
-
-    // 2. Infallible Adaptive 2-second Micro-Poll
-    pollInterval = setInterval(async () => {
+    const pollInterval = setInterval(async () => {
       if (document.hidden) return;
       const targetDate = selectedDateRef.current;
       const knownCount = currentCountRef.current;
@@ -538,11 +480,6 @@ function DailyFoodListContent() {
         const data = await res.json();
 
         if (data.changed && data.entries) {
-          if (data.count > knownCount && knownCount > 0) {
-            playChime('success');
-            showToast(`📲 Food List updated: ${data.count} students approved.`);
-          }
-
           const updated: FoodListDetails = {
             date: targetDate,
             status: data.status || 'Draft',
@@ -556,78 +493,109 @@ function DailyFoodListContent() {
             setCurrentList(updated);
             setLoading(false);
           }
-          setLiveSyncConnected(true);
         }
       } catch {}
     }, 2000);
 
-    return () => {
-      if (eventSource) eventSource.close();
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [playChime, loadTokens]);
+    return () => clearInterval(pollInterval);
+  }, []);
 
-  // Process Quick Scan (Zero-token guarantee)
+  // Process Quick Scan with Instant In-Memory Optimistic UI Insertion (<5ms)
   const processQuickScan = useCallback(
     async (rawCode: string) => {
       const code = rawCode.trim().toUpperCase();
       if (!code) return;
 
-      const res = await scanStudentIntoDailyFoodList(code, selectedDate, 'Barcode Gun');
-      if (res.success) {
-        // Safe optimistic instant state update
-        setCurrentList(prev => {
-          const existing = prev?.entries || [];
-          if (existing.some(e => e.studentId === code)) return prev;
-          const newEntry = {
-            studentId: code,
-            studentName: res.student?.name || code,
-            department: res.student?.department || '—',
-            year: res.student?.year || 0,
-            projectCode: res.project || 'INC-GENERAL',
-            projectName: res.project || 'Incubation Team',
-            addedBy: 'Barcode Gun',
-            status: 'Eligible',
-          };
-          const updated: FoodListDetails = {
-            date: selectedDate,
-            status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
-            finalizedBy: prev?.finalizedBy || null,
-            finalizedAt: prev?.finalizedAt || null,
-            entries: [newEntry, ...existing],
-          };
-          globalDateCache.set(selectedDate, updated);
-          return updated;
-        });
-
-        playChime('success');
-        showToast(`✅ ${res.student?.name || code} added to Food List! (Zero tokens issued)`);
-      } else if (res.alreadyAdded) {
+      // 1. Instant duplicate check in currentList (<0.1ms)
+      const currentEntries = currentList?.entries || [];
+      if (currentEntries.some(e => e.studentId.toUpperCase() === code)) {
         playChime('warning');
-        showToast(`ℹ️ ${res.student?.name || code} is already on today's food list.`);
-      } else {
-        playChime('error');
-        showToast(`❌ ${res.message}`);
-      }
-    },
-    [selectedDate, playChime]
-  );
-
-  // Global USB / Bluetooth Barcode Gun Scanner Listener
-  useEffect(() => {
-    let buffer = '';
-    let lastKeyTime = Date.now();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is typing into an input field or modal
-      const target = e.target as HTMLElement;
-      if (
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
-      ) {
+        showToast(`ℹ️ Student ${code} is already on today's food list.`);
         return;
       }
 
+      // 2. Instant institutional registry verification (<0.1ms)
+      const student =
+        studentRegistry.find(s => s.id.toUpperCase() === code) ||
+        globalStudentsCache.find(s => s.id.toUpperCase() === code);
+
+      const proj = projectRegistry.find(p => p.members.some(m => m.studentId.toUpperCase() === code));
+      const projectCode = proj?.code || 'INC-GENERAL';
+      const projectName = proj?.name || 'Incubation Member';
+
+      // 3. Instant Optimistic UI Update (<5ms)
+      const newEntry: FoodListEntry = {
+        studentId: student?.id || code,
+        studentName: student?.name || code,
+        department: student?.department || '—',
+        year: student?.year || 0,
+        projectCode,
+        projectName,
+        addedBy: 'Barcode Scanner Gun',
+        status: 'Eligible',
+      };
+
+      setCurrentList(prev => {
+        const existing = prev?.entries || [];
+        if (existing.some(e => e.studentId.toUpperCase() === code)) return prev;
+        const updated: FoodListDetails = {
+          date: selectedDate,
+          status: (prev?.status || 'Draft') as 'Draft' | 'Finalized',
+          finalizedBy: prev?.finalizedBy || null,
+          finalizedAt: prev?.finalizedAt || null,
+          entries: [newEntry, ...existing],
+        };
+        globalDateCache.set(selectedDate, updated);
+        return updated;
+      });
+
+      // Visual & Audio feedback
+      setHighlightedStudentId(code);
+      setTimeout(() => setHighlightedStudentId(null), 2500);
+
+      const scanTimeStr = new Date().toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      setLastScannedStudent({
+        studentId: student?.id || code,
+        studentName: student?.name || code,
+        time: scanTimeStr,
+      });
+
+      playChime('success');
+      showToast(`⚡ Scanned: ${student?.name || code} approved for food list!`);
+
+      // 4. Background DB persistence
+      try {
+        const res = await scanStudentIntoDailyFoodList(code, selectedDate, 'Barcode Gun');
+        if (!res.success && !res.alreadyAdded) {
+          // Revert optimistic insertion if invalid student or server error
+          setCurrentList(prev => {
+            if (!prev) return prev;
+            const filtered = prev.entries.filter(e => e.studentId !== code);
+            const reverted = { ...prev, entries: filtered };
+            globalDateCache.set(selectedDate, reverted);
+            return reverted;
+          });
+          playChime('error');
+          showToast(`❌ ${res.message}`);
+        }
+      } catch (err) {
+        console.error('Background scan error:', err);
+      }
+    },
+    [selectedDate, currentList, studentRegistry, projectRegistry, playChime]
+  );
+
+  // Global Hardware USB / Bluetooth Barcode Gun Scanner Listener with Smart Burst Detection
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+    let isBurstScan = false;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
       // Only listen when on Daily Food List tab
       if (activeTab !== 'list') return;
 
@@ -635,28 +603,49 @@ function DailyFoodListContent() {
       const timeDiff = currentTime - lastKeyTime;
       lastKeyTime = currentTime;
 
+      // Barcode scanners transmit characters with very short delay (<45ms)
+      if (timeDiff < 45 && buffer.length > 0) {
+        isBurstScan = true;
+      } else if (timeDiff > 120) {
+        isBurstScan = false;
+        buffer = '';
+      }
+
+      const target = e.target as HTMLElement;
+      const isInput =
+        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
+
+      // If user is typing normally in an input field (slow typing > 60ms), let it type normally!
+      if (isInput && !isBurstScan && timeDiff > 60) {
+        return;
+      }
+
       if (e.key === 'Enter') {
         if (buffer.length >= 3) {
+          e.preventDefault();
+          if (isInput) (target as HTMLInputElement).blur();
           const scannedCode = buffer.trim().toUpperCase();
           buffer = '';
+          isBurstScan = false;
           processQuickScan(scannedCode);
         } else {
           buffer = '';
+          isBurstScan = false;
         }
         return;
       }
 
       if (e.key.length === 1) {
-        if (timeDiff > 120) {
-          buffer = e.key;
-        } else {
-          buffer += e.key;
+        if (isBurstScan && isInput) {
+          // Prevent barcode gun burst from polluting focused input field
+          e.preventDefault();
         }
+        buffer += e.key;
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [activeTab, processQuickScan]);
 
 
@@ -723,13 +712,15 @@ function DailyFoodListContent() {
     await loadData(selectedDate);
   };
 
-  // Pagination states
+  // Pagination & Search states for 100+ student handling
   const [foodListPage, setFoodListPage] = useState(1);
-  const FOOD_LIST_PAGE_SIZE = 10;
+  const [foodListPageSize, setFoodListPageSize] = useState<number>(20);
+  const [foodListSearch, setFoodListSearch] = useState('');
 
+  // Reset pagination when date or search query changes
   useEffect(() => {
     setFoodListPage(1);
-  }, [selectedDate]);
+  }, [selectedDate, foodListSearch]);
 
   const [tokensPage, setTokensPage] = useState(1);
   const TOKENS_PAGE_SIZE = 10;
@@ -737,6 +728,33 @@ function DailyFoodListContent() {
   useEffect(() => {
     setTokensPage(1);
   }, [tokenSearch, tokenDateFilter, tokenSessionFilter]);
+
+  // Instant in-memory search for Daily Food List across all fields (<0.5ms)
+  const filteredFoodListEntries = useMemo(() => {
+    const raw = currentList?.entries || [];
+    if (!foodListSearch.trim()) return raw;
+    const q = foodListSearch.trim().toLowerCase();
+    return raw.filter(
+      e =>
+        e.studentId.toLowerCase().includes(q) ||
+        e.studentName.toLowerCase().includes(q) ||
+        e.department.toLowerCase().includes(q) ||
+        (e.projectName || e.projectCode || '').toLowerCase().includes(q)
+    );
+  }, [currentList?.entries, foodListSearch]);
+
+  const foodListEntries = filteredFoodListEntries;
+  const foodListTotalPages = Math.ceil(foodListEntries.length / foodListPageSize) || 1;
+  const foodListStartIndex = (foodListPage - 1) * foodListPageSize;
+  const paginatedFoodList = foodListEntries.slice(foodListStartIndex, foodListStartIndex + foodListPageSize);
+
+  // Smart pagination helper to prevent button overflow with 10+ pages
+  const getVisiblePageNumbers = (current: number, total: number): (number | string)[] => {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+    if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
 
   // Filtered tokens
   const filteredTokens = tokens.filter(t => {
@@ -753,11 +771,6 @@ function DailyFoodListContent() {
 
     return matchSearch && matchSession;
   });
-
-  const foodListEntries = currentList?.entries || [];
-  const foodListTotalPages = Math.ceil(foodListEntries.length / FOOD_LIST_PAGE_SIZE) || 1;
-  const foodListStartIndex = (foodListPage - 1) * FOOD_LIST_PAGE_SIZE;
-  const paginatedFoodList = foodListEntries.slice(foodListStartIndex, foodListStartIndex + FOOD_LIST_PAGE_SIZE);
 
   const tokensTotalPages = Math.ceil(filteredTokens.length / TOKENS_PAGE_SIZE) || 1;
   const tokensStartIndex = (tokensPage - 1) * TOKENS_PAGE_SIZE;
@@ -832,30 +845,44 @@ function DailyFoodListContent() {
       {/* ========================================================================= */}
       {activeTab === 'list' && (
         <div className="space-y-4">
-          {/* Quick Scanner Notification Banner */}
-          <div className="bg-sky-50 border border-sky-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-sky-900">
+          {/* Hardware Barcode Scanner Banner */}
+          <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-950 shadow-xs">
             <div className="flex items-center gap-2.5">
-              <span className="text-base">⚡</span>
+              <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
+                ⚡
+              </div>
               <div>
-                <strong className="font-semibold text-sky-950">Barcode Gun & Scanner Active:</strong>
-                <span className="text-sky-800 ml-1">
-                  Plug in any USB barcode scanner or connect a phone to scan student ID cards directly into this list.
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <strong className="font-bold text-emerald-950 text-sm">Hardware Barcode Scanner Active</strong>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-200/80 text-emerald-900 border border-emerald-300">
+                    Hands-Free Ready
+                  </span>
+                </div>
+                <p className="text-emerald-800 text-[11px] mt-0.5">
+                  Point and scan any student barcode card directly. Keystrokes are captured automatically with instant verification.
+                </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-sky-200 rounded-lg text-[11px] font-semibold text-slate-700 shadow-2xs">
-                <span className={`w-2 h-2 rounded-full ${liveSyncConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
-                <span>{liveSyncConnected ? 'Live Sync Active' : 'Connecting Sync...'}</span>
-              </div>
+              {lastScannedStudent && (
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-semibold text-emerald-900 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                  <span>Last: {lastScannedStudent.studentName} ({lastScannedStudent.studentId})</span>
+                </div>
+              )}
 
               <button
-                onClick={() => setShowPhoneModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                type="button"
+                onClick={toggleSound}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                  soundEnabled 
+                    ? 'bg-emerald-100/90 border-emerald-300 text-emerald-900 hover:bg-emerald-200' 
+                    : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+                }`}
+                title={soundEnabled ? 'Beep chime enabled on scan' : 'Sound muted'}
               >
-                <span>📱</span>
-                <span>Scan via Phone</span>
+                <span>{soundEnabled ? '🔔 Sound On' : '🔕 Muted'}</span>
               </button>
             </div>
           </div>
@@ -947,6 +974,81 @@ function DailyFoodListContent() {
             </div>
           </div>
 
+          {/* Batch Headcount & Summary Metrics Strip for 100+ Students */}
+          {currentList && currentList.entries.length > 0 && (
+            <div className="bg-white border border-slate-200/80 rounded-xl px-4 py-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-3 text-slate-600">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span className="font-bold text-slate-900 text-sm">{currentList.entries.length}</span>
+                  <span className="font-medium text-slate-500">Students Approved</span>
+                </div>
+                <span className="text-slate-300">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-indigo-700">{new Set(currentList.entries.map(e => e.department)).size}</span>
+                  <span className="text-slate-500">Departments</span>
+                </div>
+                <span className="text-slate-300">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-sky-700">{new Set(currentList.entries.map(e => e.projectName || e.projectCode)).size}</span>
+                  <span className="text-slate-500">Active Projects</span>
+                </div>
+              </div>
+
+              {foodListSearch && (
+                <div className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/60 px-2.5 py-1 rounded-lg">
+                  Showing {filteredFoodListEntries.length} of {currentList.entries.length} matches
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Search & Density Controls Toolbar */}
+          {currentList && currentList.entries.length > 0 && (
+            <div className="bg-white border border-slate-200/80 rounded-xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+              <div className="relative flex-1 min-w-[260px] max-w-md">
+                <input
+                  type="text"
+                  value={foodListSearch}
+                  onChange={e => setFoodListSearch(e.target.value)}
+                  placeholder="Search student roll no, name, department, or project..."
+                  className="w-full pl-9 pr-8 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all font-medium text-slate-800 placeholder:text-slate-400"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                {foodListSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setFoodListSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs font-bold w-4 h-4 flex items-center justify-center rounded-full hover:bg-slate-200 cursor-pointer"
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 text-xs text-slate-600">
+                <div className="flex items-center gap-1.5">
+                  <label className="font-semibold text-slate-500">Rows per page:</label>
+                  <select
+                    value={foodListPageSize}
+                    onChange={e => {
+                      setFoodListPageSize(Number(e.target.value));
+                      setFoodListPage(1);
+                    }}
+                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
+                  >
+                    <option value={15}>15</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={500}>All ({currentList.entries.length})</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Students Table */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
             {loading ? (
@@ -961,6 +1063,19 @@ function DailyFoodListContent() {
                 <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
                   Scan student ID cards using a USB gun or webcam, or click &ldquo;+ Add Student&rdquo; above.
                 </p>
+              </div>
+            ) : filteredFoodListEntries.length === 0 ? (
+              <div className="py-12 text-center text-slate-500">
+                <div className="text-2xl mb-2">🔍</div>
+                <div className="font-semibold text-slate-800">No students match &ldquo;{foodListSearch}&rdquo;</div>
+                <p className="text-xs text-slate-400 mt-1">Try searching by roll number, name, department, or project code.</p>
+                <button
+                  type="button"
+                  onClick={() => setFoodListSearch('')}
+                  className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  Clear Search Filter
+                </button>
               </div>
             ) : (
               <div>
@@ -979,7 +1094,14 @@ function DailyFoodListContent() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {paginatedFoodList.map((entry, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                        <tr
+                          key={idx}
+                          className={`transition-colors duration-500 ${
+                            highlightedStudentId === entry.studentId
+                              ? 'bg-emerald-100/90 ring-2 ring-emerald-400 font-semibold shadow-xs'
+                              : 'hover:bg-slate-50/70'
+                          }`}
+                        >
                           <td className="px-3 py-3 text-center text-xs text-slate-500 font-medium">
                             {foodListStartIndex + idx + 1}
                           </td>
@@ -1019,8 +1141,13 @@ function DailyFoodListContent() {
                   <div className="px-5 py-3.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50/50">
                     <div>
                       Showing <span className="font-semibold text-slate-800">{foodListEntries.length > 0 ? foodListStartIndex + 1 : 0}</span> to{' '}
-                      <span className="font-semibold text-slate-800">{Math.min(foodListStartIndex + FOOD_LIST_PAGE_SIZE, foodListEntries.length)}</span> of{' '}
+                      <span className="font-semibold text-slate-800">{Math.min(foodListStartIndex + foodListPageSize, foodListEntries.length)}</span> of{' '}
                       <span className="font-semibold text-slate-800">{foodListEntries.length}</span> students
+                      {foodListSearch && (
+                        <span className="ml-1 text-slate-400">
+                          (filtered from {currentList?.entries.length || 0})
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -1031,22 +1158,26 @@ function DailyFoodListContent() {
                         ← Previous
                       </button>
                       <div className="flex items-center gap-1">
-                        {Array.from({ length: foodListTotalPages }, (_, i) => i + 1).map(p => (
-                          <button
-                            key={p}
-                            onClick={() => setFoodListPage(p)}
-                            className={`w-7 h-7 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                              foodListPage === p
-                                ? 'bg-indigo-700 text-white shadow-xs'
-                                : 'text-slate-600 hover:bg-slate-200/70'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ))}
+                        {getVisiblePageNumbers(foodListPage, foodListTotalPages).map((p, i) =>
+                          p === '...' ? (
+                            <span key={`dots-${i}`} className="px-1 text-slate-400">...</span>
+                          ) : (
+                            <button
+                              key={p}
+                              onClick={() => setFoodListPage(Number(p))}
+                              className={`w-7 h-7 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                foodListPage === p
+                                  ? 'bg-indigo-700 text-white shadow-xs'
+                                  : 'text-slate-600 hover:bg-slate-200/70'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          )
+                        )}
                       </div>
                       <button
-                        disabled={foodListPage === foodListTotalPages}
+                        disabled={foodListPage >= foodListTotalPages}
                         onClick={() => setFoodListPage(p => Math.min(foodListTotalPages, p + 1))}
                         className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
                       >
@@ -1588,123 +1719,6 @@ function DailyFoodListContent() {
         </div>
       )}
 
-      {/* 2. Connect Mobile Phone Modal (Food List Intake Mode) */}
-      {showPhoneModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-                  <span>📱</span>
-                  <span>Connect Mobile Phone Scanner</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Operates in <strong>Food List Intake Mode</strong> (Zero Tokens Issued)
-                </p>
-              </div>
-              <button
-                onClick={() => setShowPhoneModal(false)}
-                className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Target Date Pill */}
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 flex items-center justify-between text-xs">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-indigo-700 tracking-wider">Active Target List:</span>
-                <div className="font-bold text-indigo-950 text-xs mt-0.5">{formatISTDateDMY(selectedDate)} (Night Stay Batch)</div>
-              </div>
-              <span className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[10px] font-bold">Auto-Synced</span>
-            </div>
-
-            {/* QR Code Card */}
-            <div className="bg-sky-50/60 border border-sky-200 rounded-2xl p-5 flex flex-col items-center justify-center text-center">
-              {phoneQrDataUrl ? (
-                <div className="p-3 bg-white rounded-xl shadow-sm border border-sky-200 mb-3">
-                  <img src={phoneQrDataUrl} alt="Mobile Scanner QR" className="w-48 h-48 rounded" />
-                </div>
-              ) : (
-                <div className="w-48 h-48 bg-slate-100 rounded-xl flex items-center justify-center text-xs text-slate-400 mb-3">
-                  Generating QR code...
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 text-xs font-medium">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    liveSyncConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                  }`}
-                />
-                <span className={liveSyncConnected ? 'text-emerald-700 font-semibold' : 'text-slate-500'}>
-                  {liveSyncConnected ? 'Terminal Live Sync Connected' : 'Waiting for phone sync...'}
-                </span>
-              </div>
-            </div>
-
-            {/* Mobile Scanner URL & Copy Link */}
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <label className="font-semibold text-slate-700 block">Mobile Scanner Link:</label>
-                {typeof window !== 'undefined' && window.location.hostname.includes('-') && window.location.hostname.endsWith('.vercel.app') && (
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                    ✓ Public Domain (No Login)
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={(() => {
-                    const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-                    return `${clean}/mobile-scan?mode=intake&date=${selectedDate}`;
-                  })()}
-                  onChange={e => {
-                    const val = e.target.value.replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-                    setTunnelUrlInput(val);
-                  }}
-                  onClick={e => (e.target as HTMLInputElement).select()}
-                  className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono bg-slate-50 text-slate-700 select-all focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-                    const fullUrl = `${clean}/mobile-scan?mode=intake&date=${selectedDate}`;
-                    navigator.clipboard.writeText(fullUrl);
-                    setCopiedUrlAlert(true);
-                    setTimeout(() => setCopiedUrlAlert(false), 2500);
-                  }}
-                  className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors shadow-2xs"
-                >
-                  {copiedUrlAlert ? '✓ Copied!' : 'Copy Link'}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-                <span>Point phone camera at QR code to open directly.</span>
-                <a
-                  href={`${(tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '')}/mobile-scan?mode=intake&date=${selectedDate}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sky-600 hover:underline font-semibold"
-                >
-                  Open in browser ↗
-                </a>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setShowPhoneModal(false)}
-                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 3. Add Single Student Modal */}
       {showAddStudent && (
