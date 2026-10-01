@@ -11,6 +11,14 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'Incubation Food Management System',
   description: 'Student eligibility and food token management system for college incubation facility',
+  icons: {
+    icon: [
+      { url: '/techno-incubator-logo.png' },
+      { url: '/icon.png' },
+    ],
+    shortcut: '/techno-incubator-logo.png',
+    apple: '/techno-incubator-logo.png',
+  },
 };
 
 export default function RootLayout({
