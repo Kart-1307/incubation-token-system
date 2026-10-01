@@ -225,6 +225,7 @@ function DailyFoodListContent() {
 
   const selectedDateRef = useRef<string>(selectedDate);
   const currentCountRef = useRef<number>(currentList?.entries.length || 0);
+  const inFlightScansRef = useRef<Map<string, FoodListEntry>>(new Map());
 
   useEffect(() => {
     selectedDateRef.current = selectedDate;
@@ -471,6 +472,9 @@ function DailyFoodListContent() {
   useEffect(() => {
     const pollInterval = setInterval(async () => {
       if (document.hidden) return;
+      // Guard: Do not poll while an in-flight barcode scan is actively writing to DB to prevent race condition flicker
+      if (inFlightScansRef.current.size > 0) return;
+
       const targetDate = selectedDateRef.current;
       const knownCount = currentCountRef.current;
 
@@ -480,12 +484,19 @@ function DailyFoodListContent() {
         const data = await res.json();
 
         if (data.changed && data.entries) {
+          // Merge any in-flight scans that haven't appeared in DB yet so they never disappear
+          const serverIds = new Set(data.entries.map((e: any) => e.studentId.toUpperCase()));
+          const uncommitted = Array.from(inFlightScansRef.current.values()).filter(
+            e => !serverIds.has(e.studentId.toUpperCase())
+          );
+          const mergedEntries = [...uncommitted, ...data.entries];
+
           const updated: FoodListDetails = {
             date: targetDate,
             status: data.status || 'Draft',
             finalizedBy: data.finalizedBy || null,
             finalizedAt: data.finalizedAt || null,
-            entries: data.entries,
+            entries: mergedEntries,
           };
 
           globalDateCache.set(targetDate, updated);
@@ -535,6 +546,9 @@ function DailyFoodListContent() {
         status: 'Eligible',
       };
 
+      // Register in inFlightScansRef so background sync poll never removes it
+      inFlightScansRef.current.set(code, newEntry);
+
       setCurrentList(prev => {
         const existing = prev?.entries || [];
         if (existing.some(e => e.studentId.toUpperCase() === code)) return prev;
@@ -570,7 +584,20 @@ function DailyFoodListContent() {
       // 4. Background DB persistence
       try {
         const res = await scanStudentIntoDailyFoodList(code, selectedDate, 'Barcode Gun');
-        if (!res.success && !res.alreadyAdded) {
+        inFlightScansRef.current.delete(code);
+
+        if (res.success) {
+          if (res.entry) {
+            // Update in place with refined server entry (e.g. normalized department/project)
+            setCurrentList(prev => {
+              if (!prev) return prev;
+              const updatedEntries = prev.entries.map(e => e.studentId === code ? { ...e, ...res.entry } : e);
+              const updated = { ...prev, entries: updatedEntries };
+              globalDateCache.set(selectedDate, updated);
+              return updated;
+            });
+          }
+        } else if (!res.alreadyAdded) {
           // Revert optimistic insertion if invalid student or server error
           setCurrentList(prev => {
             if (!prev) return prev;
@@ -583,6 +610,7 @@ function DailyFoodListContent() {
           showToast(`❌ ${res.message}`);
         }
       } catch (err) {
+        inFlightScansRef.current.delete(code);
         console.error('Background scan error:', err);
       }
     },

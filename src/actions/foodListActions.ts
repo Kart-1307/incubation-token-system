@@ -91,6 +91,7 @@ export async function scanStudentIntoDailyFoodList(
   notFound?: boolean;
   student?: { id: string; name: string; department: string; year: number };
   project?: string;
+  entry?: FoodListEntry;
 }> {
   const studentId = (studentIdInput || '').trim().toUpperCase();
   const date = targetDate || getTodayISTDateString();
@@ -100,24 +101,29 @@ export async function scanStudentIntoDailyFoodList(
   }
 
   try {
-    // 1. Verify student exists in student master
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-    });
+    // 1. Ultra-fast parallelized fetch of student, existing eligibility, and project membership in 1 network roundtrip
+    const [student, existing, pm] = await Promise.all([
+      prisma.student.findUnique({
+        where: { id: studentId },
+      }),
+      prisma.dailyFoodEligibility.findUnique({
+        where: {
+          date_studentId: {
+            date,
+            studentId,
+          },
+        },
+        include: { project: true },
+      }),
+      prisma.projectMember.findFirst({
+        where: { studentId },
+        include: { project: true },
+      }),
+    ]);
+
     if (!student) {
       return { success: false, notFound: true, message: `Student ID "${studentId}" not found in institutional registry.` };
     }
-
-    // 2. Check if already on today's food list
-    const existing = await prisma.dailyFoodEligibility.findUnique({
-      where: {
-        date_studentId: {
-          date,
-          studentId,
-        },
-      },
-      include: { project: true },
-    });
 
     if (existing) {
       return {
@@ -134,14 +140,9 @@ export async function scanStudentIntoDailyFoodList(
       };
     }
 
-    // 3. Find student's assigned project automatically
+    // 2. Determine assigned project
     let projectCode = '';
     let projectName = '';
-    const pm = await prisma.projectMember.findFirst({
-      where: { studentId },
-      include: { project: true },
-    });
-
     if (pm && pm.project) {
       projectCode = pm.projectCode;
       projectName = pm.project.name;
@@ -151,7 +152,7 @@ export async function scanStudentIntoDailyFoodList(
       projectName = firstProject ? firstProject.name : 'Incubation Team';
     }
 
-    // 4. Ensure daily food list header exists
+    // 3. Ensure daily food list header exists
     const createdById = await ensureDefaultStaffUser();
     await prisma.dailyFoodList.upsert({
       where: { date },
@@ -163,7 +164,7 @@ export async function scanStudentIntoDailyFoodList(
       },
     });
 
-    // 5. Create food eligibility entry (STRICTLY NO TOKEN ISSUED)
+    // 4. Create food eligibility entry (STRICTLY NO TOKEN ISSUED)
     await prisma.dailyFoodEligibility.create({
       data: {
         date,
@@ -181,6 +182,17 @@ export async function scanStudentIntoDailyFoodList(
     revalidatePath('/dashboard');
     revalidatePath('/scan-token');
 
+    const createdEntry: FoodListEntry = {
+      studentId: student.id,
+      studentName: student.name,
+      department: normalizeDepartmentName(student.department),
+      year: student.year,
+      projectCode,
+      projectName,
+      addedBy,
+      status: 'Eligible',
+    };
+
     return {
       success: true,
       message: `✓ Added ${student.name} (${studentId}) to Food List.`,
@@ -191,6 +203,7 @@ export async function scanStudentIntoDailyFoodList(
         year: student.year,
       },
       project: projectName,
+      entry: createdEntry,
     };
   } catch (error) {
     console.error('Error scanning student into daily list:', error);
