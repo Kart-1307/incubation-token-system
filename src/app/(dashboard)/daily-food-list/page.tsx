@@ -1006,7 +1006,7 @@ function DailyFoodListContent() {
           {/* Search & Density Controls Toolbar */}
           {currentList && currentList.entries.length > 0 && (
             <div className="bg-white border border-slate-200/80 rounded-xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3">
-              <div className="relative flex-1 min-w-[260px] max-w-md">
+              <div className="relative flex-1 min-w-65 max-w-md">
                 <input
                   type="text"
                   value={foodListSearch}

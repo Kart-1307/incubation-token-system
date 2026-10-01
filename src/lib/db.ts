@@ -315,6 +315,16 @@ const memoryPrisma: any = {
       Object.assign(student, data, { updatedAt: new Date() });
       return student;
     },
+    delete: async ({ where }: any) => {
+      const idx = store.students.findIndex(s => s.id.toUpperCase() === where.id.toUpperCase());
+      if (idx !== -1) {
+        return store.students.splice(idx, 1)[0];
+      }
+      return null;
+    },
+    count: async (args: any = {}) => {
+      return store.students.length;
+    },
     upsert: async ({ where, create, update }: any) => {
       const existing = await memoryPrisma.student.findUnique({ where });
       if (existing) {
@@ -373,6 +383,22 @@ const memoryPrisma: any = {
       store.projects.push(newProj);
       return newProj;
     },
+    update: async ({ where, data }: { where: { code: string }; data: any }) => {
+      const project = store.projects.find(p => p.code.toUpperCase() === where.code.toUpperCase());
+      if (!project) throw new Error('Project not found');
+      Object.assign(project, data, { updatedAt: new Date() });
+      return project;
+    },
+    delete: async ({ where }: any) => {
+      const idx = store.projects.findIndex(p => p.code.toUpperCase() === where.code.toUpperCase());
+      if (idx !== -1) {
+        return store.projects.splice(idx, 1)[0];
+      }
+      return null;
+    },
+    count: async (args: any = {}) => {
+      return store.projects.length;
+    },
     upsert: async ({ where, create, update }: any) => {
       const existing = await memoryPrisma.project.findUnique({ where });
       if (existing) {
@@ -422,6 +448,21 @@ const memoryPrisma: any = {
         return deleted;
       }
       return null;
+    },
+    deleteMany: async ({ where }: any) => {
+      let count = 0;
+      store.projectMembers = store.projectMembers.filter(pm => {
+        if (where?.studentId && pm.studentId.toUpperCase() === where.studentId.toUpperCase()) {
+          count++;
+          return false;
+        }
+        if (where?.projectCode && pm.projectCode.toUpperCase() === where.projectCode.toUpperCase()) {
+          count++;
+          return false;
+        }
+        return true;
+      });
+      return { count };
     },
   },
 
@@ -571,6 +612,13 @@ const memoryPrisma: any = {
         return false;
       });
       return { count };
+    },
+    count: async (args: any = {}) => {
+      let list = store.dailyFoodEligibilities;
+      if (args.where?.date) list = list.filter(e => e.date === args.where.date);
+      if (args.where?.studentId) list = list.filter(e => e.studentId.toUpperCase() === args.where.studentId.toUpperCase());
+      if (args.where?.projectCode) list = list.filter(e => e.projectCode.toUpperCase() === args.where.projectCode.toUpperCase());
+      return list.length;
     },
   },
 

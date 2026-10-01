@@ -326,6 +326,36 @@ export async function removeStudentFromDailyList(
 ): Promise<{ success: boolean; message: string }> {
   const studentId = studentIdInput.trim().toUpperCase();
   try {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    const studentName = student?.name || studentId;
+
+    // Check if tokens were ALREADY issued for this student for this date/cycle
+    const nextDate = getNextISTDateString(date);
+    const [tokensOnDate, nextDayTokens] = await Promise.all([
+      prisma.foodToken.findMany({
+        where: { date, studentId },
+        select: { session: true, tokenNumber: true },
+      }),
+      prisma.foodToken.findMany({
+        where: {
+          date: nextDate,
+          studentId,
+          session: { in: ['BREAKFAST', 'Breakfast', 'breakfast', 'LUNCH', 'Lunch', 'lunch'] },
+        },
+        select: { session: true, tokenNumber: true },
+      }),
+    ]);
+
+    const allIssuedTokens = [...tokensOnDate, ...nextDayTokens];
+
+    if (allIssuedTokens.length > 0) {
+      const sessionNames = allIssuedTokens.map(t => (t.session || 'Meal').toUpperCase()).join(', ');
+      return {
+        success: false,
+        message: `Cannot remove ${studentName}: meal token(s) (${sessionNames}) have already been issued for this date. Tokens must be revoked first.`,
+      };
+    }
+
     const res = await prisma.dailyFoodEligibility.deleteMany({
       where: {
         date,
@@ -344,7 +374,7 @@ export async function removeStudentFromDailyList(
       return { success: true, message: 'Student was already removed from food list.' };
     }
 
-    return { success: true, message: 'Student removed from food list.' };
+    return { success: true, message: `Student ${studentName} removed from food list.` };
   } catch (error) {
     console.error('Error removing student from daily list:', error);
     return { success: false, message: 'Server error while removing student.' };
@@ -567,16 +597,18 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
             date,
             session: { in: ['DINNER', 'Dinner', 'dinner'] },
           },
+          include: { student: true, project: true },
         }),
         prisma.foodToken.findMany({
           where: {
             date: nextDate,
             session: { in: ['BREAKFAST', 'Breakfast', 'breakfast', 'LUNCH', 'Lunch', 'lunch'] },
           },
+          include: { student: true, project: true },
         }),
       ]);
 
-      if (!list && eligibilities.length === 0) return null;
+      if (!list && eligibilities.length === 0 && dinnerTokens.length === 0 && nextDayTokens.length === 0) return null;
 
       const dinnerMap = new Map<string, any>();
       dinnerTokens.forEach((t: any) => dinnerMap.set(t.studentId, t));
@@ -588,6 +620,8 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
         if (sess.includes('BREAKFAST')) breakfastMap.set(t.studentId, t);
         if (sess.includes('LUNCH')) lunchMap.set(t.studentId, t);
       });
+
+      const eligibilityStudentIds = new Set(eligibilities.map((e: any) => e.studentId));
 
       const students: StudentMealAudit[] = eligibilities.map((e: any) => {
         const dToken = dinnerMap.get(e.studentId);
@@ -623,6 +657,51 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
           mealsClaimed,
         };
       });
+
+      // Include any students who were issued tokens for this cycle even if unlinked from draft list
+      const extraTokenMap = new Map<string, any>();
+      [...dinnerTokens, ...nextDayTokens].forEach((t: any) => {
+        if (!eligibilityStudentIds.has(t.studentId) && !extraTokenMap.has(t.studentId)) {
+          extraTokenMap.set(t.studentId, t);
+        }
+      });
+
+      for (const [stId, sampleTok] of extraTokenMap.entries()) {
+        const dToken = dinnerMap.get(stId);
+        const bToken = breakfastMap.get(stId);
+        const lToken = lunchMap.get(stId);
+
+        let mealsClaimed = 0;
+        if (dToken) mealsClaimed++;
+        if (bToken) mealsClaimed++;
+        if (lToken) mealsClaimed++;
+
+        students.push({
+          studentId: stId,
+          studentName: sampleTok.student?.name || stId,
+          department: sampleTok.student?.department || '—',
+          year: sampleTok.student?.year || 1,
+          projectCode: sampleTok.projectCode || sampleTok.project?.code || '—',
+          dinner: {
+            issued: Boolean(dToken),
+            tokenNumber: dToken?.tokenNumber,
+            time: dToken?.issuedAt ? formatISTTime(dToken.issuedAt) : undefined,
+          },
+          breakfast: {
+            issued: Boolean(bToken),
+            tokenNumber: bToken?.tokenNumber,
+            time: bToken?.issuedAt ? formatISTTime(bToken.issuedAt) : undefined,
+          },
+          lunch: {
+            issued: Boolean(lToken),
+            tokenNumber: lToken?.tokenNumber,
+            time: lToken?.issuedAt ? formatISTTime(lToken.issuedAt) : undefined,
+          },
+          mealsClaimed,
+        });
+      }
+
+      students.sort((a, b) => a.studentId.localeCompare(b.studentId));
 
       const todayStr = getTodayISTDateString();
       const currentSession = getMealSession();

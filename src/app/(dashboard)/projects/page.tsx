@@ -6,6 +6,7 @@ import {
   getProjects,
   createProject,
   addProjectMember,
+  removeProjectMember,
   getStudents,
   deleteProject,
   type ProjectRecord,
@@ -85,6 +86,15 @@ export default function Projects() {
       await loadData();
     } else {
       showToast(res.message);
+    }
+  };
+
+  const handleRemoveMember = async (studentId: string, studentName: string) => {
+    if (!selected) return;
+    const res = await removeProjectMember(selected.code, studentId);
+    showToast(res.message);
+    if (res.success) {
+      await loadData();
     }
   };
 
@@ -201,7 +211,7 @@ export default function Projects() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    {['Student ID', 'Name', 'Department', 'Year', 'Role'].map(h => (
+                    {['Student ID', 'Name', 'Department', 'Year', 'Role', 'Action'].map(h => (
                       <th key={h} className="text-left py-2 pr-4 text-xs font-semibold text-slate-500 uppercase">{h}</th>
                     ))}
                   </tr>
@@ -216,6 +226,14 @@ export default function Projects() {
                         <td className="py-2.5 pr-4 text-slate-500 text-xs">{s?.department || m.department || '—'}</td>
                         <td className="py-2.5 pr-4 text-slate-500 text-xs">{s?.year ? `Year ${s.year}` : '—'}</td>
                         <td className="py-2.5 pr-4 text-slate-600 text-xs font-medium">{m.role}</td>
+                        <td className="py-2.5 pr-4 text-slate-600 text-xs">
+                          <button
+                            onClick={() => handleRemoveMember(m.studentId, s?.name || m.studentName || m.studentId)}
+                            className="text-rose-600 hover:text-rose-800 font-medium hover:underline cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -408,9 +426,9 @@ export default function Projects() {
       {projectToDelete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete Incubation Project?</h3>
+            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete or Archive Project?</h3>
             <p className="text-sm text-slate-500 mb-4">
-              Are you sure you want to delete project <span className="font-bold text-slate-800">{projectToDelete.name}</span> (<span className="font-mono text-indigo-700">{projectToDelete.code}</span>)? This will remove team memberships for this project.
+              Are you sure you want to remove project <span className="font-bold text-slate-800">{projectToDelete.name}</span> (<span className="font-mono text-indigo-700">{projectToDelete.code}</span>)? Active team memberships will be removed. All historical meal tokens and night-stay audit records will remain safely preserved.
             </p>
             <div className="flex justify-end gap-3">
               <button

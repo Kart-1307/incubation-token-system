@@ -264,21 +264,27 @@ export function getTokenEffectiveSession(token: { session?: string | null; issue
 /**
  * Generate friendly guidance message when a student tries to request a token
  * after already receiving one for a specific meal session.
+ * Accurately guides student based on the night-stay 3-meal cycle (Dinner -> Breakfast -> Lunch).
  */
 export function getDuplicateTokenMessage(
   session: string,
   timeStr: string,
-  studentName: string
+  studentName: string,
+  options?: { isRegisteredTonight?: boolean }
 ): string {
   const normalizedSession = (session || getMealSession()).toUpperCase();
 
   if (normalizedSession === 'BREAKFAST') {
-    return `Token already issued for BREAKFAST for ${studentName} at ${timeStr}. Please come back during the LUNCH session!`;
+    return `Token already issued for BREAKFAST for ${studentName} at ${timeStr}. Next approved meal: Today's LUNCH (12:30 PM – 02:30 PM)!`;
   }
   
   if (normalizedSession === 'LUNCH') {
-    return `Token already issued for LUNCH for ${studentName} at ${timeStr}. Please come back during the DINNER session!`;
+    if (options?.isRegisteredTonight) {
+      return `Token already issued for LUNCH for ${studentName} at ${timeStr}. Next approved meal: DINNER tonight (07:30 PM – 10:30 PM)!`;
+    }
+    return `Token already issued for LUNCH for ${studentName} at ${timeStr}. This completes your approved night-stay meal cycle (Dinner, Breakfast, Lunch). Thank you!`;
   }
 
-  return `Token already issued for DINNER for ${studentName} at ${timeStr}. All meal sessions for today are complete!`;
+  return `Token already issued for DINNER for ${studentName} at ${timeStr}. Next approved meal: Tomorrow's BREAKFAST (07:30 AM – 10:00 AM)!`;
 }
+
