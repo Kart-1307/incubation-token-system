@@ -336,10 +336,36 @@ export async function deleteStudent(studentIdInput: string): Promise<{ success: 
       return { success: false, message: `Student ID "${studentId}" not found.` };
     }
 
-    // Explicitly delete child records first to satisfy foreign key constraints
+    // Check if student has historical tokens or night-stay eligibility records
+    const [tokenCount, eligibilityCount] = await Promise.all([
+      prisma.foodToken.count({ where: { studentId } }),
+      prisma.dailyFoodEligibility.count({ where: { studentId } }),
+    ]);
+
+    if (tokenCount > 0 || eligibilityCount > 0) {
+      // SOFT DELETE / ARCHIVE:
+      // Institutional meal tokens and night-stay audit records are immutable financial logs.
+      // We detach active project memberships and mark the student as 'Inactive'.
+      await prisma.projectMember.deleteMany({ where: { studentId } });
+      await prisma.student.update({
+        where: { id: studentId },
+        data: { status: 'Inactive' },
+      });
+
+      appCache.invalidateTags(['students', 'projects', 'dashboard', 'food-list', 'foodtokens']);
+      revalidatePath('/students');
+      revalidatePath('/projects');
+      revalidatePath('/dashboard');
+      revalidatePath('/daily-food-list');
+
+      return {
+        success: true,
+        message: `Student ${student.name} (${studentId}) archived as Inactive. Historical meal tokens (${tokenCount}) and night-stay logs are permanently preserved.`,
+      };
+    }
+
+    // If student has 0 tokens and 0 eligibilities (e.g. newly created typo), clean hard delete is safe
     await prisma.projectMember.deleteMany({ where: { studentId } });
-    await prisma.foodToken.deleteMany({ where: { studentId } });
-    await prisma.dailyFoodEligibility.deleteMany({ where: { studentId } });
     await prisma.student.delete({ where: { id: studentId } });
 
     appCache.invalidateTags(['students', 'projects', 'dashboard', 'food-list']);
@@ -348,10 +374,44 @@ export async function deleteStudent(studentIdInput: string): Promise<{ success: 
     revalidatePath('/dashboard');
     revalidatePath('/daily-food-list');
 
-    return { success: true, message: `Student ${student.name} (${studentId}) removed successfully.` };
+    return { success: true, message: `Student ${student.name} (${studentId}) deleted successfully.` };
   } catch (error) {
     console.error('Error deleting student:', error);
     return { success: false, message: 'Server error while deleting student record.' };
+  }
+}
+
+export async function removeProjectMember(
+  projectCodeInput: string,
+  studentIdInput: string
+): Promise<{ success: boolean; message: string }> {
+  const projectCode = projectCodeInput.trim().toUpperCase();
+  const studentId = studentIdInput.trim().toUpperCase();
+
+  try {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    const studentName = student?.name || studentId;
+
+    // Delete membership row only. Never touch food tokens or daily food lists!
+    await prisma.projectMember.deleteMany({
+      where: {
+        projectCode,
+        studentId,
+      },
+    });
+
+    appCache.invalidateTags(['projects', 'students', 'dashboard']);
+    revalidatePath('/projects');
+    revalidatePath('/students');
+    revalidatePath('/dashboard');
+
+    return {
+      success: true,
+      message: `${studentName} (${studentId}) removed from project ${projectCode}. Historical meal tokens and logs remain preserved.`,
+    };
+  } catch (error) {
+    console.error('Error removing project member:', error);
+    return { success: false, message: 'Server error while removing member from project.' };
   }
 }
 
@@ -363,10 +423,34 @@ export async function deleteProject(projectCodeInput: string): Promise<{ success
       return { success: false, message: `Project code "${code}" not found.` };
     }
 
-    // Delete all child records referencing this project to satisfy FK constraints
+    // Check if any tokens or food eligibilities exist under this project
+    const [tokenCount, eligibilityCount] = await Promise.all([
+      prisma.foodToken.count({ where: { projectCode: code } }),
+      prisma.dailyFoodEligibility.count({ where: { projectCode: code } }),
+    ]);
+
+    if (tokenCount > 0 || eligibilityCount > 0) {
+      // Archive project instead of hard-deleting to preserve token and eligibility audit history
+      await prisma.projectMember.deleteMany({ where: { projectCode: code } });
+      await prisma.project.update({
+        where: { code },
+        data: { status: 'Completed' },
+      });
+
+      appCache.invalidateTags(['projects', 'students', 'dashboard', 'food-list', 'foodtokens']);
+      revalidatePath('/projects');
+      revalidatePath('/students');
+      revalidatePath('/dashboard');
+      revalidatePath('/daily-food-list');
+
+      return {
+        success: true,
+        message: `Project ${project.name} (${code}) archived as Completed. Historical meal tokens (${tokenCount}) and night-stay logs are permanently preserved.`,
+      };
+    }
+
+    // If 0 tokens and 0 eligibilities, hard delete is safe
     await prisma.projectMember.deleteMany({ where: { projectCode: code } });
-    await prisma.foodToken.deleteMany({ where: { projectCode: code } });
-    await prisma.dailyFoodEligibility.deleteMany({ where: { projectCode: code } });
     await prisma.project.delete({ where: { code } });
 
     appCache.invalidateTags(['projects', 'students', 'dashboard', 'food-list']);

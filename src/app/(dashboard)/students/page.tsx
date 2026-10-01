@@ -535,9 +535,9 @@ export default function Students() {
       {studentToDelete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete Student Record?</h3>
+            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete or Archive Student?</h3>
             <p className="text-sm text-slate-500 mb-4">
-              Are you sure you want to remove <span className="font-bold text-slate-800">{studentToDelete.name}</span> (<span className="font-mono text-indigo-700">{studentToDelete.id}</span>)? This will remove their project assignments and tokens.
+              Are you sure you want to remove <span className="font-bold text-slate-800">{studentToDelete.name}</span> (<span className="font-mono text-indigo-700">{studentToDelete.id}</span>)? Active project assignments will be removed. All historical meal tokens and night-stay logs will be safely preserved.
             </p>
             <div className="flex justify-end gap-3">
               <button
