@@ -6,7 +6,6 @@ import { verifyStudentScan, issueFoodToken, type VerificationResult } from '@/ac
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getMealSession, getTodayISTDateString, getPreviousISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 import { getStudents, type StudentRecord } from '@/actions/studentActions';
-import QRCode from 'qrcode';
 
 type ScanState =
   | 'idle'
@@ -42,24 +41,23 @@ export default function ScanToken() {
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
   const [yesterdayFoodListInfo, setYesterdayFoodListInfo] = useState<FoodListDetails | null>(null);
   const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
-  const [liveSyncConnected, setLiveSyncConnected] = useState<boolean>(false);
-  const [showPhoneQrModal, setShowPhoneQrModal] = useState<boolean>(false);
-  const [phoneQrDataUrl, setPhoneQrDataUrl] = useState<string>('');
-  const [tunnelUrlInput, setTunnelUrlInput] = useState<string>(() => {
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('last_mobile_scanner_url');
-      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
-        return saved;
-      }
-      const hostname = window.location.hostname;
-      if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
-        return 'https://incubation-token-system-five.vercel.app';
-      }
-      return window.location.origin;
+      const saved = localStorage.getItem('hardware_scanner_sound');
+      return saved !== 'false';
     }
-    return '';
+    return true;
   });
-  const [copiedAlert, setCopiedAlert] = useState<string>('');
+
+  const toggleSound = () => {
+    setSoundEnabled(prev => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('hardware_scanner_sound', String(next));
+      }
+      return next;
+    });
+  };
   const inputRef = useRef<HTMLInputElement>(null);
 
   const stateRef = useRef<ScanState>(state);
@@ -70,52 +68,21 @@ export default function ScanToken() {
     generatedTokenRef.current = generatedToken;
   }, [state, generatedToken]);
 
-  // Initialize and persist mobile scanner URL (clean origin, auto-fallback to production domain)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('last_mobile_scanner_url');
-      if (saved && !saved.includes('sairam-incubation.loca.lt') && !saved.includes('169.254')) {
-        setTunnelUrlInput(saved);
-      } else {
-        const hostname = window.location.hostname;
-        if (hostname.includes('-') && hostname.endsWith('.vercel.app')) {
-          setTunnelUrlInput('https://incubation-token-system-five.vercel.app');
-        } else {
-          setTunnelUrlInput(window.location.origin);
-        }
-      }
-    }
-  }, [showPhoneQrModal]);
-
-  // Generate dynamic QR code whenever tunnel/host URL changes
-  useEffect(() => {
-    let clean = (tunnelUrlInput || '').trim();
-    if (!clean) return;
-    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-      clean = `https://${clean}`;
-    }
-    const target = clean.endsWith('/mobile-scan') ? clean : `${clean.replace(/\/$/, '')}/mobile-scan`;
-    QRCode.toDataURL(target, { width: 220, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } })
-      .then(url => setPhoneQrDataUrl(url))
-      .catch(err => console.error('QR generation error:', err));
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('last_mobile_scanner_url', clean);
-    }
-  }, [tunnelUrlInput]);
-
-  // Global hardware USB/Bluetooth barcode scanner gun detection
+  // Global hardware USB/Bluetooth barcode scanner gun detection (zero-lag burst capture)
   useEffect(() => {
     let buffer = '';
     let lastKeyTime = Date.now();
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target && target.tagName === 'INPUT' && target !== inputRef.current) return;
+      const isOtherInput = target && target.tagName === 'INPUT' && target !== inputRef.current;
 
       const currentTime = Date.now();
       const timeDiff = currentTime - lastKeyTime;
       lastKeyTime = currentTime;
+
+      // Hardware scanners send characters with inter-key delta < 45ms
+      const isScannerBurst = timeDiff < 45;
 
       if (e.key === 'Enter') {
         if (buffer.length >= 3) {
@@ -134,7 +101,8 @@ export default function ScanToken() {
       }
 
       if (e.key.length === 1) {
-        if (timeDiff > 120) {
+        if (isOtherInput && !isScannerBurst) return;
+        if (timeDiff > 100) {
           buffer = e.key;
         } else {
           buffer += e.key;
@@ -146,8 +114,9 @@ export default function ScanToken() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [todayStr]);
 
-  // Synthesize Web Audio chime on terminal for real-time mobile scans
+  // Synthesize Web Audio chime for instant hardware scanner feedback
   const playTerminalChime = (type: 'success' | 'warning' | 'error') => {
+    if (!soundEnabled) return;
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
@@ -191,110 +160,7 @@ export default function ScanToken() {
     getStudents().then(res => setDbStudents(res)).catch(() => {});
   }, [todayStr]);
 
-  // Real-time Server-Sent Events listener connecting phone scans to laptop terminal
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    let autoResetTimer: NodeJS.Timeout | null = null;
 
-    try {
-      eventSource = new EventSource('/api/terminal-stream');
-
-      eventSource.addEventListener('connected', () => {
-        setLiveSyncConnected(true);
-      });
-
-      eventSource.onopen = () => {
-        setLiveSyncConnected(true);
-      };
-
-      eventSource.onmessage = (e) => {
-        try {
-          const payload = JSON.parse(e.data);
-          if (payload.type === 'TOKEN_ISSUED') {
-            setGeneratedToken({
-              id: payload.tokenNumber || `tok-${Date.now()}`,
-              tokenNumber: payload.tokenNumber,
-              studentId: payload.studentId,
-              studentName: payload.studentName || 'Student',
-              project: payload.project || 'Incubation Member',
-              date: payload.date || todayStr,
-              time: formatISTTime(payload.time || payload.timestamp),
-              session: payload.session || getMealSession(),
-              status: 'Issued',
-            });
-            setStudent({
-              id: payload.studentId,
-              name: payload.studentName || 'Student',
-              department: payload.department || '',
-              year: 3,
-              status: 'Active',
-            });
-            setProjectName(payload.project || 'Incubation Member');
-            setMessage(payload.message || 'Token issued via Mobile Scanner');
-            setState('token-generated');
-
-            playTerminalChime('success');
-          } else if (payload.type === 'DUPLICATE') {
-            // Guard: If currently holding the generated token screen for this student or token number,
-            // hold the token generated screen! Do not kick it out with a duplicate warning!
-            if (
-              stateRef.current === 'token-generated' &&
-              (generatedTokenRef.current?.studentId === payload.studentId ||
-                generatedTokenRef.current?.tokenNumber === payload.tokenNumber)
-            ) {
-              return;
-            }
-
-            setGeneratedToken({
-              id: payload.tokenNumber || `tok-${Date.now()}`,
-              tokenNumber: payload.tokenNumber,
-              studentId: payload.studentId,
-              studentName: payload.studentName || 'Student',
-              project: payload.project || 'Incubation Member',
-              date: payload.date || todayStr,
-              time: formatISTTime(payload.time || payload.timestamp),
-              session: payload.session || getMealSession(),
-              status: 'Issued',
-            });
-            setMessage(payload.message);
-            setState('duplicate');
-            playTerminalChime('warning');
-          } else if (payload.type === 'INELIGIBLE') {
-            setStudent({
-              id: payload.studentId,
-              name: payload.studentName || payload.studentId,
-              department: payload.department || '—',
-              year: payload.year || 0,
-              status: 'Active',
-            });
-            setScannedId(payload.studentId || '');
-            setProjectName(payload.project || 'Unassigned');
-            setMessage(payload.message || `Student not eligible for ${payload.session || currentMealSession}.`);
-            setState('found-not-eligible');
-            playTerminalChime('error');
-          } else if (payload.type === 'NOT_FOUND') {
-            setScannedId(payload.studentId || '');
-            setMessage(payload.message || `Student ID "${payload.studentId}" not found in institutional registry.`);
-            setState('not-found');
-            playTerminalChime('error');
-          }
-        } catch (err) {
-          console.warn('Error parsing terminal stream payload:', err);
-        }
-      };
-
-      eventSource.onerror = () => {
-        setLiveSyncConnected(false);
-      };
-    } catch (e) {
-      console.warn('SSE connection error:', e);
-    }
-
-    return () => {
-      if (autoResetTimer) clearTimeout(autoResetTimer);
-      if (eventSource) eventSource.close();
-    };
-  }, [todayStr]);
 
   // Keep input focused for physical hardware USB/Bluetooth barcode scanner guns
   useEffect(() => {
@@ -332,6 +198,7 @@ export default function ScanToken() {
     if (!res.found) {
       setState('not-found');
       setMessage(res.message);
+      playTerminalChime('error');
       return;
     }
 
@@ -352,15 +219,18 @@ export default function ScanToken() {
         status: 'Issued',
       });
       setState('duplicate');
+      playTerminalChime('warning');
       return;
     }
 
     if (!res.isEligible) {
       setState('found-not-eligible');
+      playTerminalChime('error');
       return;
     }
 
     setState('found-eligible');
+    playTerminalChime('success');
   };
 
   const handleVerifyForm = async (e: React.FormEvent) => {
@@ -383,9 +253,11 @@ export default function ScanToken() {
       if (res.message?.includes('already issued') || res.message?.includes('already generated')) {
         setMessage(res.message);
         setState('duplicate');
+        playTerminalChime('warning');
       } else {
         setMessage(res.message || 'Failed to issue token');
         setState('found-eligible');
+        playTerminalChime('error');
       }
       return;
     }
@@ -404,6 +276,7 @@ export default function ScanToken() {
     });
 
     setState('token-generated');
+    playTerminalChime('success');
   };
 
   const reset = () => {
@@ -426,33 +299,28 @@ export default function ScanToken() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Mess Verification Terminal</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Scan student ID barcode/QR card or use wireless mobile phone scanner
+            Scan student ID barcode card using hardware handheld scanner gun
           </p>
         </div>
 
-        {/* Live Phone Sync Connection Indicator & Link */}
+        {/* Hardware Scanner Active Status Badge & Sound Toggle */}
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium border ${
-            liveSyncConnected
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : 'bg-slate-100 text-slate-500 border-slate-200'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${liveSyncConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-            <span>{liveSyncConnected ? 'Phone Sync: Live' : 'Phone Sync: Ready'}</span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>⚡ Hardware Scanner Active</span>
           </span>
 
-          {/* Connect Phone Scanner Button (Opens On-Screen QR Code Modal) */}
           <button
-            onClick={() => setShowPhoneQrModal(true)}
             type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-            title="Scan QR Code with phone to open wireless camera scanner"
+            onClick={toggleSound}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+              soundEnabled
+                ? 'bg-emerald-100/90 border-emerald-300 text-emerald-900 hover:bg-emerald-200'
+                : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+            }`}
+            title={soundEnabled ? 'Beep chime enabled on scan' : 'Sound muted'}
           >
-            <svg className="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
-              <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-              <line x1="12" y1="18" x2="12.01" y2="18" />
-            </svg>
-            <span>📱 Connect Phone</span>
+            <span>{soundEnabled ? '🔔 Sound On' : '🔕 Muted'}</span>
           </button>
         </div>
       </div>
@@ -1045,116 +913,6 @@ export default function ScanToken() {
 
 
 
-      {/* Phone Scanner Connect QR Modal */}
-      {showPhoneQrModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden text-slate-800 animate-in fade-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">📱</span>
-                <div>
-                  <h3 className="text-sm font-bold">Connect Phone Scanner</h3>
-                  <p className="text-[11px] text-slate-300">Point phone camera at this QR code</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowPhoneQrModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs cursor-pointer"
-              >
-                ✕ Close
-              </button>
-            </div>
-
-            {/* QR Code Container */}
-            <div className="p-5 flex flex-col items-center justify-center text-center">
-              <div className="bg-slate-50 p-3 rounded-2xl border-2 border-dashed border-indigo-200 shadow-inner mb-3">
-                {phoneQrDataUrl ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={phoneQrDataUrl}
-                    alt="Scan with phone"
-                    className="w-48 h-48 rounded-xl object-contain mx-auto"
-                  />
-                ) : (
-                  <div className="w-48 h-48 flex items-center justify-center text-xs text-slate-400">
-                    Generating QR...
-                  </div>
-                )}
-              </div>
-
-              <div className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Open default camera on phone & tap link</span>
-              </div>
-
-              {/* Mobile Scanner URL & Copy Link */}
-              <div className="w-full mt-4 text-left">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-semibold text-slate-500 block">
-                    Mobile Scanner Link:
-                  </label>
-                  {typeof window !== 'undefined' && window.location.hostname.includes('-') && window.location.hostname.endsWith('.vercel.app') && (
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      ✓ Public Domain (No Login)
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    value={(() => {
-                      const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-                      return `${clean}/mobile-scan`;
-                    })()}
-                    onChange={e => {
-                      const val = e.target.value.replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-                      setTunnelUrlInput(val);
-                    }}
-                    onClick={e => (e.target as HTMLInputElement).select()}
-                    className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono bg-slate-50 text-slate-700 select-all focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const clean = (tunnelUrlInput || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/mobile-scan.*$/, '').replace(/\/$/, '');
-                      navigator.clipboard.writeText(`${clean}/mobile-scan`);
-                      setCopiedAlert('Link Copied!');
-                      setTimeout(() => setCopiedAlert(''), 2500);
-                    }}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-2xs"
-                    title="Copy full mobile-scan URL"
-                  >
-                    Copy Link
-                  </button>
-                </div>
-              </div>
-
-              {copiedAlert && (
-                <div className="mt-2 text-xs font-bold text-emerald-600 animate-in fade-in">
-                  ✓ {copiedAlert}
-                </div>
-              )}
-
-              <div className="mt-4 pt-3 border-t border-slate-100 w-full flex items-center justify-between text-xs">
-                <a
-                  href="/mobile-scan"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-indigo-600 hover:underline font-medium"
-                >
-                  Open in this browser ↗
-                </a>
-                <button
-                  onClick={() => setShowPhoneQrModal(false)}
-                  className="px-3 py-1 bg-slate-900 text-white rounded-lg font-medium text-xs hover:bg-slate-800 cursor-pointer"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

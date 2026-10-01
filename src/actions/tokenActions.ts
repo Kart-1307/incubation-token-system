@@ -199,7 +199,20 @@ export async function verifyStudentScan(
     if (existingToken) {
       const timeStr = formatISTTime(existingToken.issuedAt);
 
-      const smartMessage = getDuplicateTokenMessage(currentSession, timeStr, student.name);
+      let isRegisteredTonight = false;
+      if (currentSession === 'LUNCH') {
+        const tonightCheck = await prisma.dailyFoodEligibility.findUnique({
+          where: {
+            date_studentId: {
+              date,
+              studentId: student.id,
+            },
+          },
+        });
+        isRegisteredTonight = Boolean(tonightCheck);
+      }
+
+      const smartMessage = getDuplicateTokenMessage(currentSession, timeStr, student.name, { isRegisteredTonight });
 
       return {
         found: true,
@@ -359,7 +372,20 @@ export async function issueFoodToken(
       if (existingToken) {
         const timeStr = formatISTTime(existingToken.issuedAt);
 
-        const smartMessage = getDuplicateTokenMessage(session, timeStr, student.name);
+        let isRegisteredTonight = false;
+        if (session === 'LUNCH') {
+          const tonightCheck = await prisma.dailyFoodEligibility.findUnique({
+            where: {
+              date_studentId: {
+                date: todayStr,
+                studentId: student.id,
+              },
+            },
+          });
+          isRegisteredTonight = Boolean(tonightCheck);
+        }
+
+        const smartMessage = getDuplicateTokenMessage(session, timeStr, student.name, { isRegisteredTonight });
 
         return {
           success: false,
