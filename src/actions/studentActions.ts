@@ -136,6 +136,99 @@ export async function createStudent(data: {
   }
 }
 
+export async function updateStudent(
+  idInput: string,
+  data: {
+    name: string;
+    courseType?: string;
+    department: string;
+    year: number;
+    email: string;
+    phone?: string | null;
+    status?: string;
+  }
+): Promise<{ success: boolean; message: string; student?: StudentRecord }> {
+  const id = (idInput || '').trim().toUpperCase();
+  const name = (data.name || '').trim();
+  const email = (data.email || '').trim();
+  const courseType = data.courseType ? data.courseType.trim() : 'Bachelor';
+
+  if (!id) {
+    return { success: false, message: 'Student ID is required.' };
+  }
+  if (!name || !email) {
+    return { success: false, message: 'Student Name and Email are required.' };
+  }
+
+  try {
+    const existing = await prisma.student.findUnique({
+      where: { id },
+      include: { projectMemberships: true },
+    });
+
+    if (!existing) {
+      return { success: false, message: `Student with ID "${id}" not found.` };
+    }
+
+    // Check if email conflicts with another student
+    const emailConflict = await prisma.student.findFirst({
+      where: {
+        email,
+        NOT: { id },
+      },
+    });
+
+    if (emailConflict) {
+      return {
+        success: false,
+        message: `Email "${email}" is already used by another student (${emailConflict.name} - ${emailConflict.id}).`,
+      };
+    }
+
+    const canonicalDept = normalizeDepartmentName(data.department);
+
+    const updated = await prisma.student.update({
+      where: { id },
+      data: {
+        name,
+        courseType,
+        department: canonicalDept,
+        year: Number(data.year) || existing.year,
+        email,
+        phone: data.phone !== undefined ? data.phone : existing.phone,
+        status: data.status || existing.status,
+      },
+      include: {
+        projectMemberships: true,
+      },
+    });
+
+    appCache.invalidateTags(['students', 'dashboard', 'projects', 'food-list']);
+    revalidatePath('/students');
+    revalidatePath('/dashboard');
+    revalidatePath('/daily-food-list');
+
+    return {
+      success: true,
+      message: `Student ${name} (${id}) updated successfully.`,
+      student: {
+        id: updated.id,
+        name: updated.name,
+        courseType: updated.courseType,
+        department: updated.department,
+        year: updated.year,
+        email: updated.email,
+        phone: updated.phone,
+        status: updated.status as 'Active' | 'Inactive',
+        projects: (updated.projectMemberships || []).map((pm: any) => pm.projectCode),
+      },
+    };
+  } catch (error) {
+    console.error('Error updating student:', error);
+    return { success: false, message: 'Server error while updating student.' };
+  }
+}
+
 export async function getProjects(): Promise<ProjectRecord[]> {
   return appCache.get('projects_all', 30, async () => {
     try {

@@ -310,11 +310,15 @@ const memoryPrisma: any = {
       store.students.push(newStudent);
       return newStudent;
     },
-    update: async ({ where, data }: { where: { id: string }; data: any }) => {
+    update: async ({ where, data, include }: { where: { id: string }; data: any; include?: any }) => {
       const student = store.students.find(s => s.id.toUpperCase() === where.id.toUpperCase());
       if (!student) throw new Error('Student not found');
       Object.assign(student, data, { updatedAt: new Date() });
-      return student;
+      const res: any = { ...student };
+      if (include?.projectMemberships) {
+        res.projectMemberships = store.projectMembers.filter(pm => pm.studentId.toUpperCase() === student.id.toUpperCase());
+      }
+      return res;
     },
     delete: async ({ where }: any) => {
       const idx = store.students.findIndex(s => s.id.toUpperCase() === where.id.toUpperCase());
