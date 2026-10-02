@@ -33,6 +33,7 @@ model Student {
   id          String   @id // College Roll/Registration ID, e.g., "23CS101"
   name        String
   department  String   // "CSE", "ECE", "ME", etc.
+  courseType  String   @default("Bachelor") // "Bachelor" | "Master"
   year        Int      // 1, 2, 3, 4
   email       String   @unique
   phone       String?

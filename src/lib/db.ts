@@ -23,15 +23,15 @@ const initialProjects = [
 ];
 
 const initialStudents = [
-  { id: '23CS101', name: 'Siddharth V', department: 'Computer Science and Engineering', year: 3, email: 'siddharth@college.edu', phone: '9876543210', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS102', name: 'Fayas K', department: 'Computer Science and Engineering', year: 3, email: 'fayas@college.edu', phone: '9876543211', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS103', name: 'Nirmal E', department: 'Computer Science and Engineering', year: 3, email: 'nirmal@college.edu', phone: '9876543212', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS104', name: 'Arun Kumar', department: 'Computer Science and Engineering', year: 3, email: 'arun@college.edu', phone: '9876543213', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS105', name: 'Priya S', department: 'Computer Science and Engineering', year: 3, email: 'priya@college.edu', phone: '9876543214', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23ME101', name: 'Rahul M', department: 'Mechanical Engineering', year: 2, email: 'rahul@college.edu', phone: '9876543215', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23EC101', name: 'Kavya R', department: 'Electronics and Communication Engineering', year: 2, email: 'kavya@college.edu', phone: '9876543216', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '22CS201', name: 'Deepak N', department: 'Computer Science and Engineering', year: 4, email: 'deepak@college.edu', phone: '9876543217', status: 'Inactive', createdAt: new Date(), updatedAt: new Date() },
-  { id: 'SEC24CS110', name: 'Karthikeyan S', department: 'Computer Science and Engineering', year: 1, email: 'karthikeyan.s@sairam.edu.in', phone: '9876543220', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS101', name: 'Siddharth V', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'siddharth@college.edu', phone: '9876543210', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS102', name: 'Fayas K', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'fayas@college.edu', phone: '9876543211', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS103', name: 'Nirmal E', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'nirmal@college.edu', phone: '9876543212', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS104', name: 'Arun Kumar', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'arun@college.edu', phone: '9876543213', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23CS105', name: 'Priya S', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'priya@college.edu', phone: '9876543214', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23ME101', name: 'Rahul M', department: 'Mechanical Engineering', courseType: 'Bachelor', year: 2, email: 'rahul@college.edu', phone: '9876543215', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '23EC101', name: 'Kavya R', department: 'Electronics and Communication Engineering', courseType: 'Bachelor', year: 2, email: 'kavya@college.edu', phone: '9876543216', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
+  { id: '22CS201', name: 'Deepak N', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 4, email: 'deepak@college.edu', phone: '9876543217', status: 'Inactive', createdAt: new Date(), updatedAt: new Date() },
+  { id: 'SEC24CS110', name: 'Karthikeyan S', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 1, email: 'karthikeyan.s@sairam.edu.in', phone: '9876543220', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
 ];
 
 const initialProjectMembers = [
@@ -299,6 +299,7 @@ const memoryPrisma: any = {
         id: data.id.toUpperCase(),
         name: data.name,
         department: data.department,
+        courseType: data.courseType || 'Bachelor',
         year: Number(data.year),
         email: data.email,
         phone: data.phone || null,
@@ -309,11 +310,15 @@ const memoryPrisma: any = {
       store.students.push(newStudent);
       return newStudent;
     },
-    update: async ({ where, data }: { where: { id: string }; data: any }) => {
+    update: async ({ where, data, include }: { where: { id: string }; data: any; include?: any }) => {
       const student = store.students.find(s => s.id.toUpperCase() === where.id.toUpperCase());
       if (!student) throw new Error('Student not found');
       Object.assign(student, data, { updatedAt: new Date() });
-      return student;
+      const res: any = { ...student };
+      if (include?.projectMemberships) {
+        res.projectMemberships = store.projectMembers.filter(pm => pm.studentId.toUpperCase() === student.id.toUpperCase());
+      }
+      return res;
     },
     delete: async ({ where }: any) => {
       const idx = store.students.findIndex(s => s.id.toUpperCase() === where.id.toUpperCase());

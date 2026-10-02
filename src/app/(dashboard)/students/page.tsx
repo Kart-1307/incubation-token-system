@@ -2,32 +2,15 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Badge from '@/components/Badge';
-import { getStudentsBundle, createStudent, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import { getStudentsBundle, createStudent, updateStudent, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 
-const UNDERGRAD_DEPARTMENTS = [
-  'Civil Engineering',
-  'Computer Science and Engineering',
-  'Electrical and Electronics Engineering',
-  'Electronics and Communication Engineering',
-  'Electronics and Instrumentation Engineering',
-  'Mechanical Engineering',
-  'Mechatronics Engineering',
-  'Computer and Communication Engineering',
-  'Computer Science and Engineering (Artificial Intelligence and Machine Learning)',
-  'Computer Science and Engineering (Cyber Security)',
-  'Computer Science and Engineering (Internet of Things)',
-  'Information Technology (B.Tech)',
-  'Artificial Intelligence and Data Science (B.Tech)',
-  'Computer Science and Business Systems (B.Tech)',
-];
+import {
+  UNDERGRAD_DEPARTMENTS,
+  POSTGRAD_DEPARTMENTS,
+  ALL_DEPARTMENTS,
+} from '@/utils/departmentUtils';
 
-const POSTGRAD_DEPARTMENTS = [
-  'Integrated & Postgraduate Programs (M.E. / M.Tech)',
-];
-
-const ALL_DEPARTMENTS = [...UNDERGRAD_DEPARTMENTS, ...POSTGRAD_DEPARTMENTS];
-
-const years = ['All', '1', '2', '3', '4'];
+const years = ['All', '1', '2', '3', '4', '5'];
 
 type View = 'list' | 'detail';
 
@@ -65,19 +48,33 @@ export default function Students() {
   const [projectList, setProjectList] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
   const [loading, setLoading] = useState(() => !initialCache);
   const [search, setSearch] = useState('');
+  const [courseFilter, setCourseFilter] = useState('All');
   const [deptFilter, setDeptFilter] = useState('All');
   const [yearFilter, setYearFilter] = useState('All');
   const [view, setView] = useState<View>('list');
   const [selected, setSelected] = useState<StudentRecord | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
+  const [studentToEdit, setStudentToEdit] = useState<StudentRecord | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    courseType: 'Bachelor',
+    department: 'Computer Science and Engineering',
+    year: '1',
+    email: '',
+    phone: '',
+    status: 'Active',
+  });
+  const [editFormError, setEditFormError] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [toast, setToast] = useState('');
 
   const [form, setForm] = useState({
     id: '',
     name: '',
+    courseType: 'Bachelor',
     department: 'Computer Science and Engineering',
-    year: '3',
+    year: '1',
     email: '',
     phone: '',
     status: 'Active',
@@ -127,6 +124,7 @@ export default function Students() {
   const filtered = studentList.filter(s => {
     const q = search.toLowerCase();
     const matchQ = !q || s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    const matchCourse = courseFilter === 'All' || (s.courseType || 'Bachelor') === courseFilter;
     const matchDept =
       deptFilter === 'All' ||
       s.department === deptFilter ||
@@ -136,7 +134,7 @@ export default function Students() {
       (deptFilter === 'Electrical and Electronics Engineering' && s.department === 'EEE') ||
       (deptFilter === 'Civil Engineering' && s.department === 'Civil');
     const matchYear = yearFilter === 'All' || String(s.year) === yearFilter;
-    return matchQ && matchDept && matchYear;
+    return matchQ && matchCourse && matchDept && matchYear;
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -144,7 +142,7 @@ export default function Students() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, deptFilter, yearFilter]);
+  }, [search, courseFilter, deptFilter, yearFilter]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const startIndex = (currentPage - 1) * PAGE_SIZE;
@@ -159,6 +157,7 @@ export default function Students() {
     const res = await createStudent({
       id: form.id,
       name: form.name,
+      courseType: form.courseType,
       department: form.department,
       year: Number(form.year),
       email: form.email,
@@ -168,7 +167,7 @@ export default function Students() {
 
     if (res.success) {
       showToast(res.message);
-      setForm({ id: '', name: '', department: 'Computer Science and Engineering', year: '3', email: '', phone: '', status: 'Active' });
+      setForm({ id: '', name: '', courseType: 'Bachelor', department: 'Computer Science and Engineering', year: '1', email: '', phone: '', status: 'Active' });
       setFormError('');
       setShowAdd(false);
       await loadData();
@@ -193,6 +192,73 @@ export default function Students() {
     }
   };
 
+  const handleOpenEdit = (student: StudentRecord) => {
+    setStudentToEdit(student);
+    setEditForm({
+      name: student.name,
+      courseType: student.courseType || 'Bachelor',
+      department: student.department,
+      year: String(student.year),
+      email: student.email,
+      phone: student.phone || '',
+      status: student.status,
+    });
+    setEditFormError('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!studentToEdit) return;
+    if (!editForm.name.trim() || !editForm.email.trim()) {
+      setEditFormError('Student Name and Email are required.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    setEditFormError('');
+    try {
+      const res = await updateStudent(studentToEdit.id, {
+        name: editForm.name,
+        courseType: editForm.courseType,
+        department: editForm.department,
+        year: Number(editForm.year) || 1,
+        email: editForm.email,
+        phone: editForm.phone || null,
+        status: editForm.status,
+      });
+
+      if (res.success && res.student) {
+        showToast(res.message);
+        const updated = res.student;
+
+        // Optimistically update local lists
+        setStudentList(prev => prev.map(s => (s.id === updated.id ? updated : s)));
+        if (selected && selected.id === updated.id) {
+          setSelected(updated);
+        }
+
+        // Update memory & storage cache
+        if (memoryStudentsCache) {
+          memoryStudentsCache.students = memoryStudentsCache.students.map(s =>
+            s.id === updated.id ? updated : s
+          );
+        }
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.removeItem('incubation_students_cache');
+          } catch {}
+        }
+
+        setStudentToEdit(null);
+      } else {
+        setEditFormError(res.message || 'Error updating student.');
+      }
+    } catch (e: any) {
+      setEditFormError(e?.message || 'Server error while saving changes.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   if (view === 'detail' && selected) {
     const studentProjects = projectList.filter(p => p.members.some(m => m.studentId === selected.id));
     return (
@@ -201,12 +267,20 @@ export default function Students() {
           <button onClick={() => setView('list')} className="text-sm text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer">
             ← Back to Students
           </button>
-          <button
-            onClick={() => setStudentToDelete(selected)}
-            className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-          >
-            Delete Student
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleOpenEdit(selected)}
+              className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              ✏️ Edit Student
+            </button>
+            <button
+              onClick={() => setStudentToDelete(selected)}
+              className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+            >
+              Delete Student
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -222,6 +296,7 @@ export default function Students() {
             </div>
             <div className="space-y-2 text-sm">
               {[
+                { l: 'Course Type', v: selected.courseType || 'Bachelor' },
                 { l: 'Department', v: selected.department },
                 { l: 'Year', v: `Year ${selected.year}` },
                 { l: 'Email', v: selected.email },
@@ -301,17 +376,26 @@ export default function Students() {
           className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-72 bg-white"
         />
         <select
+          value={courseFilter}
+          onChange={e => setCourseFilter(e.target.value)}
+          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+        >
+          <option value="All">All Course Types</option>
+          <option value="Bachelor">Bachelor</option>
+          <option value="Master">Master</option>
+        </select>
+        <select
           value={deptFilter}
           onChange={e => setDeptFilter(e.target.value)}
           className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white max-w-xs"
         >
           <option value="All">All Departments</option>
-          <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+          <optgroup label="Bachelor Programs (B.E. / B.Tech)">
             {UNDERGRAD_DEPARTMENTS.map(d => (
               <option key={d} value={d}>{d}</option>
             ))}
           </optgroup>
-          <optgroup label="Integrated & Postgraduate Programs (M.E. / M.Tech)">
+          <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
             {POSTGRAD_DEPARTMENTS.map(d => (
               <option key={d} value={d}>{d}</option>
             ))}
@@ -351,7 +435,7 @@ export default function Students() {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="text-center py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-14">S.No</th>
-                  {['Roll No / ID', 'Name', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
+                  {['Roll No / ID', 'Name', 'Course', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
                     <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -362,6 +446,15 @@ export default function Students() {
                     <td className="py-3 px-3 text-xs text-slate-500 font-medium text-center">{startIndex + idx + 1}</td>
                     <td className="py-3 px-4 text-xs text-indigo-700 font-semibold tracking-wide font-mono">{s.id}</td>
                     <td className="py-3 px-4 font-medium text-slate-800">{s.name}</td>
+                    <td className="py-3 px-4 text-xs">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                        s.courseType === 'Master'
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-sky-50 text-sky-700 border-sky-200'
+                      }`}>
+                        {s.courseType || 'Bachelor'}
+                      </span>
+                    </td>
                     <td className="py-3 px-4 text-slate-600 text-xs">{s.department}</td>
                     <td className="py-3 px-4 text-slate-600 text-xs">Year {s.year}</td>
                     <td className="py-3 px-4 text-slate-500 text-xs font-mono">{s.email}</td>
@@ -373,7 +466,14 @@ export default function Students() {
                       )}
                     </td>
                     <td className="py-3 px-4"><Badge status={s.status} /></td>
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <button
+                        onClick={() => handleOpenEdit(s)}
+                        className="text-xs text-amber-700 hover:text-amber-900 font-semibold hover:underline mr-3 cursor-pointer inline-flex items-center gap-1"
+                        title="Quick edit student details"
+                      >
+                        ✏️ Edit
+                      </button>
                       <button
                         onClick={() => { setSelected(s); setView('detail'); }}
                         className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline mr-3 cursor-pointer"
@@ -490,30 +590,88 @@ export default function Students() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Course Type *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(p => ({
+                        ...p,
+                        courseType: 'Bachelor',
+                        department: UNDERGRAD_DEPARTMENTS[0],
+                        year: '1',
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
+                      form.courseType === 'Bachelor'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    🎓 Bachelor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(p => ({
+                        ...p,
+                        courseType: 'Master',
+                        department: POSTGRAD_DEPARTMENTS[0],
+                        year: '1',
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
+                      form.courseType === 'Master'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    📜 Master
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Department *</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {form.courseType === 'Master' ? 'Master Program *' : 'Department *'}
+                  </label>
                   <select
                     value={form.department}
                     onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
-                    <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
-                      {UNDERGRAD_DEPARTMENTS.map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Integrated & Postgraduate Programs (M.E. / M.Tech)">
-                      {POSTGRAD_DEPARTMENTS.map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </optgroup>
+                    {form.courseType === 'Master' ? (
+                      <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
+                        {POSTGRAD_DEPARTMENTS.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      <optgroup label="Bachelor Programs (B.E. / B.Tech)">
+                        {UNDERGRAD_DEPARTMENTS.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Year *</label>
-                  <select value={form.year} onChange={e => setForm(p => ({ ...p, year: e.target.value }))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    {['1', '2', '3', '4'].map(y => <option key={y} value={y}>Year {y}</option>)}
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Year of Study *</label>
+                  <select
+                    value={form.year}
+                    onChange={e => setForm(p => ({ ...p, year: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {(form.department.includes('Integrated')
+                      ? ['1', '2', '3', '4', '5']
+                      : form.courseType === 'Master'
+                      ? ['1', '2']
+                      : ['1', '2', '3', '4']
+                    ).map(y => (
+                      <option key={y} value={y}>Year {y}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -525,6 +683,214 @@ export default function Students() {
               </button>
               <button onClick={saveStudent} className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer">
                 Save to Database
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Edit Student Modal */}
+      {studentToEdit && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200 shrink-0">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-800 text-lg">Quick Edit Student</h3>
+                <span className="font-mono text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200 font-semibold">
+                  {studentToEdit.id}
+                </span>
+              </div>
+              <button
+                onClick={() => { setStudentToEdit(null); setEditFormError(''); }}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Roll Number / ID (Read-only / Primary Key) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span>Student Roll Number / ID</span>
+                  <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-normal">
+                    🔒 Primary Identifier (Cannot be changed)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={studentToEdit.id}
+                  disabled
+                  className="w-full border border-slate-200 bg-slate-100 rounded-lg px-3 py-2 text-sm text-slate-600 font-mono font-semibold cursor-not-allowed"
+                />
+              </div>
+
+              {/* Full Name */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Anand R"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Course Type Toggle */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Course Type *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditForm(p => ({
+                        ...p,
+                        courseType: 'Bachelor',
+                        department: (UNDERGRAD_DEPARTMENTS as readonly string[]).includes(p.department) ? p.department : UNDERGRAD_DEPARTMENTS[0],
+                        year: Number(p.year) > 4 ? '4' : p.year,
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
+                      editForm.courseType === 'Bachelor'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    🎓 Bachelor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditForm(p => ({
+                        ...p,
+                        courseType: 'Master',
+                        department: (POSTGRAD_DEPARTMENTS as readonly string[]).includes(p.department) ? p.department : POSTGRAD_DEPARTMENTS[0],
+                        year: p.department.includes('Integrated') ? (Number(p.year) > 5 ? '5' : p.year) : Number(p.year) > 2 ? '2' : p.year,
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
+                      editForm.courseType === 'Master'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    📜 Master
+                  </button>
+                </div>
+              </div>
+
+              {/* Department & Year */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {editForm.courseType === 'Master' ? 'Master Program *' : 'Department *'}
+                  </label>
+                  <select
+                    value={editForm.department}
+                    onChange={e => setEditForm(p => ({ ...p, department: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    {editForm.courseType === 'Master' ? (
+                      <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
+                        {POSTGRAD_DEPARTMENTS.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      <optgroup label="Bachelor Programs (B.E. / B.Tech)">
+                        {UNDERGRAD_DEPARTMENTS.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Year of Study *</label>
+                  <select
+                    value={editForm.year}
+                    onChange={e => setEditForm(p => ({ ...p, year: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {(editForm.department.includes('Integrated')
+                      ? ['1', '2', '3', '4', '5']
+                      : editForm.courseType === 'Master'
+                      ? ['1', '2']
+                      : ['1', '2', '3', '4']
+                    ).map(y => (
+                      <option key={y} value={y}>Year {y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Institutional Email */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Institutional Email *</label>
+                <input
+                  type="email"
+                  value={editForm.email}
+                  onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="student@college.edu"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Phone & Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    value={editForm.phone}
+                    onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))}
+                    placeholder="9876543210"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Status *</label>
+                  <select
+                    value={editForm.status}
+                    onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              {editFormError && (
+                <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">
+                  {editFormError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setStudentToEdit(null); setEditFormError(''); }}
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                {isSavingEdit ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
               </button>
             </div>
           </div>

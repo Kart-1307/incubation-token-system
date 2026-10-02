@@ -80,6 +80,54 @@ export async function getDailyFoodList(dateInput?: string): Promise<FoodListDeta
   }
 }
 
+export interface LetterMealCounts {
+  breakfastConsumed: number;
+  lunchConsumed: number;
+  dinnerToConsume: number;
+}
+
+export async function getLetterMealSessionCounts(dateInput?: string): Promise<LetterMealCounts> {
+  const date = dateInput || getTodayISTDateString();
+  try {
+    const [breakfastCount, lunchCount, eligibilityCount, dinnerTokensCount] = await Promise.all([
+      prisma.foodToken.count({
+        where: {
+          date,
+          session: { in: ['BREAKFAST', 'Breakfast', 'breakfast'] },
+        },
+      }),
+      prisma.foodToken.count({
+        where: {
+          date,
+          session: { in: ['LUNCH', 'Lunch', 'lunch'] },
+        },
+      }),
+      prisma.dailyFoodEligibility.count({
+        where: { date },
+      }),
+      prisma.foodToken.count({
+        where: {
+          date,
+          session: { in: ['DINNER', 'Dinner', 'dinner'] },
+        },
+      }),
+    ]);
+
+    return {
+      breakfastConsumed: breakfastCount,
+      lunchConsumed: lunchCount,
+      dinnerToConsume: eligibilityCount > 0 ? eligibilityCount : dinnerTokensCount,
+    };
+  } catch (error) {
+    console.error('Error fetching letter meal session counts:', error);
+    return {
+      breakfastConsumed: 0,
+      lunchConsumed: 0,
+      dinnerToConsume: 0,
+    };
+  }
+}
+
 export async function scanStudentIntoDailyFoodList(
   studentIdInput: string,
   targetDate?: string,

@@ -2,10 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { getLetterMealSessionCounts } from '@/actions/foodListActions';
+import { formatDepartmentShort, formatYearRoman } from '@/utils/departmentUtils';
 
 export interface StudentInfo {
   studentId: string;
   name: string;
+  department?: string;
+  year?: number | string;
 }
 
 interface FoodRequestLetterModalProps {
@@ -33,6 +37,9 @@ export interface LetterDocState {
   page2Title: string;
   page2Subtitle: string;
   studentsList: StudentInfo[];
+  breakfastCount?: number | string;
+  lunchCount?: number | string;
+  dinnerCount?: number | string;
 }
 
 const STORAGE_KEY = 'incubation_letter_draft';
@@ -83,6 +90,9 @@ export default function FoodRequestLetterModal({
     page2Title: 'List of Students Requiring Food Arrangement',
     page2Subtitle: `Food Date: ${dateStr}   |   Total Students: ${studentsList.length}`,
     studentsList: studentsList.map(s => ({ ...s })),
+    breakfastCount: 0,
+    lunchCount: 0,
+    dinnerCount: studentsList.length,
   });
 
   const [letterDoc, setLetterDoc] = useState<LetterDocState>(() => buildDefaultDoc());
@@ -91,7 +101,7 @@ export default function FoodRequestLetterModal({
     setMounted(true);
   }, []);
 
-  // When modal opens, load saved persistent draft from localStorage (never wipe old draft!)
+  // When modal opens, load saved persistent draft from localStorage and fetch current meal session counts
   useEffect(() => {
     if (!isOpen) return;
 
@@ -129,6 +139,9 @@ export default function FoodRequestLetterModal({
           page2Title: parsed.page2Title || 'List of Students Requiring Food Arrangement',
           page2Subtitle: `Food Date: ${formattedDate}   |   Total Students: ${studentsList.length}`,
           studentsList: studentsList.length > 0 ? studentsList.map(s => ({ ...s })) : (parsed.studentsList || []),
+          breakfastCount: parsed.breakfastCount !== undefined ? parsed.breakfastCount : 0,
+          lunchCount: parsed.lunchCount !== undefined ? parsed.lunchCount : 0,
+          dinnerCount: parsed.dinnerCount !== undefined ? parsed.dinnerCount : studentsList.length,
         };
 
         if (parsed.fromName === 'Karthikeyan S' || parsed.fromRollNo === 'SEC24CS110') {
@@ -137,11 +150,36 @@ export default function FoodRequestLetterModal({
         }
 
         setLetterDoc(merged);
+
+        // Fetch live counts for letter date in background
+        getLetterMealSessionCounts(foodDate).then(counts => {
+          setLetterDoc(curr => {
+            const updated = {
+              ...curr,
+              breakfastCount: curr.breakfastCount !== undefined && curr.breakfastCount !== '' && curr.breakfastCount !== 0 ? curr.breakfastCount : counts.breakfastConsumed,
+              lunchCount: curr.lunchCount !== undefined && curr.lunchCount !== '' && curr.lunchCount !== 0 ? curr.lunchCount : counts.lunchConsumed,
+              dinnerCount: curr.dinnerCount !== undefined && curr.dinnerCount !== '' && curr.dinnerCount !== 0 ? curr.dinnerCount : (counts.dinnerToConsume || studentsList.length),
+            };
+            return updated;
+          });
+        }).catch(console.error);
+
         return;
       }
     } catch { }
 
-    setLetterDoc(buildDefaultDoc(formattedDate));
+    const freshDoc = buildDefaultDoc(formattedDate);
+    setLetterDoc(freshDoc);
+
+    // Fetch live counts
+    getLetterMealSessionCounts(foodDate).then(counts => {
+      setLetterDoc(curr => ({
+        ...curr,
+        breakfastCount: counts.breakfastConsumed,
+        lunchCount: counts.lunchConsumed,
+        dinnerCount: counts.dinnerToConsume || studentsList.length,
+      }));
+    }).catch(console.error);
   }, [isOpen, foodDate]);
 
   // Persist draft updates to localStorage immediately
@@ -180,7 +218,7 @@ export default function FoodRequestLetterModal({
     });
   };
 
-  const updateStudentRow = (index: number, field: 'name' | 'studentId', value: string) => {
+  const updateStudentRow = (index: number, field: 'name' | 'studentId' | 'department' | 'year', value: string) => {
     setLetterDoc(prev => {
       const nextList = [...prev.studentsList];
       nextList[index] = { ...nextList[index], [field]: value };
@@ -196,7 +234,7 @@ export default function FoodRequestLetterModal({
 
   const handleAddStudentRow = () => {
     setLetterDoc(prev => {
-      const nextList = [...prev.studentsList, { name: 'Student Name', studentId: 'SEC000' }];
+      const nextList = [...prev.studentsList, { name: 'Student Name', studentId: 'SEC000', department: 'CSE', year: 'IV' }];
       const next = {
         ...prev,
         studentsList: nextList,
@@ -326,27 +364,59 @@ export default function FoodRequestLetterModal({
             </p>
           </div>
 
-          {/* Compact Centered Table */}
+          {/* Compact Centered 5-Column Table */}
           <table className="max-w-xl mx-auto w-full text-xs font-sans border-collapse border border-slate-400">
             <thead>
               <tr className="bg-slate-100 border-b border-slate-400 text-slate-900">
-                <th className="border border-slate-400 px-3 py-1.5 w-14 text-center font-bold">S.No</th>
-                <th className="border border-slate-400 px-4 py-1.5 text-left font-bold">Student Name</th>
-                <th className="border border-slate-400 px-4 py-1.5 w-44 text-center font-bold">Student ID</th>
+                <th className="border border-slate-400 px-2 py-1.5 w-12 text-center font-bold">S.no</th>
+                <th className="border border-slate-400 px-3 py-1.5 text-left font-bold">Name</th>
+                <th className="border border-slate-400 px-3 py-1.5 w-32 text-center font-bold">College ID</th>
+                <th className="border border-slate-400 px-2 py-1.5 w-24 text-center font-bold">Dept</th>
+                <th className="border border-slate-400 px-2 py-1.5 w-16 text-center font-bold">Year</th>
               </tr>
             </thead>
             <tbody>
               {letterDoc.studentsList.map((st, idx) => (
                 <tr key={`${st.studentId}-${idx}`} className="border-b border-slate-300">
-                  <td className="border border-slate-400 px-3 py-1.5 text-center text-slate-600 font-medium">{idx + 1}</td>
-                  <td className="border border-slate-400 px-4 py-1.5 font-medium text-slate-800">{st.name}</td>
-                  <td className="border border-slate-400 px-4 py-1.5 text-center font-bold text-slate-900 font-sans tracking-wider text-[11px]">
+                  <td className="border border-slate-400 px-2 py-1.5 text-center text-slate-600 font-medium">{idx + 1}</td>
+                  <td className="border border-slate-400 px-3 py-1.5 font-medium text-slate-800">{st.name}</td>
+                  <td className="border border-slate-400 px-3 py-1.5 text-center font-bold text-slate-900 font-sans tracking-wider text-[11px]">
                     {st.studentId}
+                  </td>
+                  <td className="border border-slate-400 px-2 py-1.5 text-center font-bold text-slate-700 text-xs">
+                    {formatDepartmentShort(st.department)}
+                  </td>
+                  <td className="border border-slate-400 px-2 py-1.5 text-center font-bold text-slate-700 text-xs">
+                    {formatYearRoman(st.year)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Meal Consumption Summary (B, L, D) */}
+          <div className="mt-8 pt-4 border-t border-slate-300 max-w-xl mx-auto">
+            <div className="text-xs font-serif font-bold text-slate-900 mb-2">
+              Meal Consumption Summary:
+            </div>
+            <div className="space-y-1.5 text-xs font-serif text-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm w-10">B –</span>
+                <span className="font-bold text-sm">{letterDoc.breakfastCount ?? 0}</span>
+                <span className="text-slate-500 text-[11px]">(Breakfast consumed already)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm w-10">L –</span>
+                <span className="font-bold text-sm">{letterDoc.lunchCount ?? 0}</span>
+                <span className="text-slate-500 text-[11px]">(Lunch consumed already)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm w-10">D –</span>
+                <span className="font-bold text-sm">{letterDoc.dinnerCount ?? letterDoc.studentsList.length}</span>
+                <span className="text-slate-500 text-[11px]">(Dinner to be consumed tonight)</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="text-center text-xs font-serif text-slate-400 pt-6">Page 2 of 2</div>
@@ -754,14 +824,16 @@ export default function FoodRequestLetterModal({
                     )}
                   </div>
 
-                  {/* Compact Centered 3-Column Table */}
+                  {/* Compact Centered 5-Column Table */}
                   <div className="overflow-x-auto">
                     <table className="max-w-xl mx-auto w-full text-xs font-sans border-collapse border border-slate-400">
                       <thead>
                         <tr className="bg-slate-100 border-b border-slate-400 text-slate-900">
-                          <th className="border border-slate-400 px-3 py-1.5 w-14 text-center font-bold">S.No</th>
-                          <th className="border border-slate-400 px-4 py-1.5 text-left font-bold">Student Name</th>
-                          <th className="border border-slate-400 px-4 py-1.5 w-44 text-center font-bold">Student ID</th>
+                          <th className="border border-slate-400 px-2 py-1.5 w-12 text-center font-bold">S.no</th>
+                          <th className="border border-slate-400 px-3 py-1.5 text-left font-bold">Name</th>
+                          <th className="border border-slate-400 px-3 py-1.5 w-32 text-center font-bold">College ID</th>
+                          <th className="border border-slate-400 px-2 py-1.5 w-24 text-center font-bold">Dept</th>
+                          <th className="border border-slate-400 px-2 py-1.5 w-16 text-center font-bold">Year</th>
                           {isEditMode && (
                             <th className="border border-slate-400 px-2 py-1 w-12 text-center text-slate-500">Action</th>
                           )}
@@ -770,7 +842,7 @@ export default function FoodRequestLetterModal({
                       <tbody>
                         {letterDoc.studentsList.map((st, idx) => (
                           <tr key={`${st.studentId}-${idx}`} className="border-b border-slate-300">
-                            <td className="border border-slate-400 px-3 py-1.5 text-center text-slate-600 font-medium">
+                            <td className="border border-slate-400 px-2 py-1.5 text-center text-slate-600 font-medium">
                               {idx + 1}
                             </td>
                             <td className="border border-slate-400 px-3 py-1 font-medium text-slate-800">
@@ -795,6 +867,32 @@ export default function FoodRequestLetterModal({
                                 />
                               ) : (
                                 <span>{st.studentId}</span>
+                              )}
+                            </td>
+                            <td className="border border-slate-400 px-2 py-1 text-center font-bold text-slate-700 text-xs">
+                              {isEditMode ? (
+                                <input
+                                  type="text"
+                                  value={st.department || ''}
+                                  onChange={(e) => updateStudentRow(idx, 'department', e.target.value)}
+                                  placeholder="e.g. CSE"
+                                  className="w-full bg-amber-50/80 px-1 py-0.5 border-b border-dashed border-amber-400 outline-none rounded text-xs text-center font-bold"
+                                />
+                              ) : (
+                                <span>{formatDepartmentShort(st.department)}</span>
+                              )}
+                            </td>
+                            <td className="border border-slate-400 px-2 py-1 text-center font-bold text-slate-700 text-xs">
+                              {isEditMode ? (
+                                <input
+                                  type="text"
+                                  value={st.year !== undefined && st.year !== null ? String(st.year) : ''}
+                                  onChange={(e) => updateStudentRow(idx, 'year', e.target.value)}
+                                  placeholder="IV"
+                                  className="w-full bg-amber-50/80 px-1 py-0.5 border-b border-dashed border-amber-400 outline-none rounded text-xs text-center font-bold"
+                                />
+                              ) : (
+                                <span>{formatYearRoman(st.year)}</span>
                               )}
                             </td>
                             {isEditMode && (
@@ -826,6 +924,60 @@ export default function FoodRequestLetterModal({
                         </button>
                       </div>
                     )}
+                  </div>
+
+                  {/* Meal Consumption Summary (B, L, D) matching handwritten reference */}
+                  <div className="mt-8 pt-4 border-t border-slate-300 max-w-xl mx-auto">
+                    <div className="text-xs font-serif font-bold text-slate-900 mb-2">
+                      Meal Consumption Summary:
+                    </div>
+                    <div className="space-y-2 text-xs font-serif text-slate-800">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm w-8">B –</span>
+                        {isEditMode ? (
+                          <input
+                            type="text"
+                            value={letterDoc.breakfastCount ?? ''}
+                            onChange={(e) => updateField('breakfastCount', e.target.value)}
+                            className="w-16 bg-amber-50/80 border-b border-dashed border-amber-400 px-1 py-0.5 font-bold text-xs rounded text-center outline-none"
+                            placeholder="0"
+                          />
+                        ) : (
+                          <span className="font-bold text-sm">{letterDoc.breakfastCount ?? 0}</span>
+                        )}
+                        <span className="text-slate-500 text-[11px]">(Breakfast consumed already)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm w-8">L –</span>
+                        {isEditMode ? (
+                          <input
+                            type="text"
+                            value={letterDoc.lunchCount ?? ''}
+                            onChange={(e) => updateField('lunchCount', e.target.value)}
+                            className="w-16 bg-amber-50/80 border-b border-dashed border-amber-400 px-1 py-0.5 font-bold text-xs rounded text-center outline-none"
+                            placeholder="0"
+                          />
+                        ) : (
+                          <span className="font-bold text-sm">{letterDoc.lunchCount ?? 0}</span>
+                        )}
+                        <span className="text-slate-500 text-[11px]">(Lunch consumed already)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm w-8">D –</span>
+                        {isEditMode ? (
+                          <input
+                            type="text"
+                            value={letterDoc.dinnerCount ?? ''}
+                            onChange={(e) => updateField('dinnerCount', e.target.value)}
+                            className="w-16 bg-amber-50/80 border-b border-dashed border-amber-400 px-1 py-0.5 font-bold text-xs rounded text-center outline-none"
+                            placeholder={String(letterDoc.studentsList.length)}
+                          />
+                        ) : (
+                          <span className="font-bold text-sm">{letterDoc.dinnerCount ?? letterDoc.studentsList.length}</span>
+                        )}
+                        <span className="text-slate-500 text-[11px]">(Dinner to be consumed tonight)</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
