@@ -21,10 +21,24 @@ export const UNDERGRAD_DEPARTMENTS = [
 ] as const;
 
 export const POSTGRAD_DEPARTMENTS = [
-  'Integrated & Postgraduate Programs (M.E. / M.Tech)',
+  'Big Data Analytics (M.E.)',
+  'CAD/CAM Engineering (M.E.)',
+  'Communication Systems (M.E.)',
+  'Computer Science and Engineering (M.E.)',
+  'Power Electronics and Drives (M.E.)',
+  'Industrial Safety Engineering (M.E.)',
+  'Embedded System Technologies (M.E.)',
+  'Computer Science and Engineering With Specialization in Networks (M.E.)',
+  'Defence Technology (M.E.)',
+  'Master of Business Administration (MBA)',
+  'Computer Science and Engineering (5 Years Integrated)',
 ] as const;
 
-export const ALL_DEPARTMENTS = [...UNDERGRAD_DEPARTMENTS, ...POSTGRAD_DEPARTMENTS];
+export const ALL_DEPARTMENTS = [
+  ...UNDERGRAD_DEPARTMENTS,
+  ...POSTGRAD_DEPARTMENTS,
+  'Integrated & Postgraduate Programs (M.E. / M.Tech)',
+];
 
 const SHORT_CODE_TO_FULL_NAME: Record<string, string> = {
   CSE: 'Computer Science and Engineering',
@@ -49,9 +63,28 @@ const SHORT_CODE_TO_FULL_NAME: Record<string, string> = {
   MTRX: 'Mechatronics Engineering',
   MTS: 'Mechatronics Engineering',
   FED: 'Foundational Engineering Department',
+
+  // Master Programs
+  BD: 'Big Data Analytics (M.E.)',
+  CD: 'CAD/CAM Engineering (M.E.)',
+  'CAD/CAM': 'CAD/CAM Engineering (M.E.)',
+  CO: 'Communication Systems (M.E.)',
+  COMM: 'Communication Systems (M.E.)',
+  CS: 'Computer Science and Engineering (M.E.)',
+  PE: 'Power Electronics and Drives (M.E.)',
+  PED: 'Power Electronics and Drives (M.E.)',
+  IS: 'Industrial Safety Engineering (M.E.)',
+  ISE: 'Industrial Safety Engineering (M.E.)',
+  ES: 'Embedded System Technologies (M.E.)',
+  EST: 'Embedded System Technologies (M.E.)',
+  CN: 'Computer Science and Engineering With Specialization in Networks (M.E.)',
+  DT: 'Defence Technology (M.E.)',
+  MBA: 'Master of Business Administration (MBA)',
+  MG: 'Master of Business Administration (MBA)',
 };
 
 const FULL_NAME_TO_SHORT_CODE: Record<string, string> = {
+  // Undergraduate Programs
   'Computer Science and Engineering': 'CSE',
   'Mechanical Engineering': 'MECH',
   'Electronics and Communication Engineering': 'ECE',
@@ -71,19 +104,61 @@ const FULL_NAME_TO_SHORT_CODE: Record<string, string> = {
   'Mechatronics Engineering': 'MTRX',
   'Foundational Engineering Department': 'FED',
   'Integrated & Postgraduate Programs (M.E. / M.Tech)': 'PG',
+
+  // 5 Years Integrated Program
+  'Computer Science and Engineering (5 Years Integrated)': 'CJ',
+  'Computer Science and Engineering (5 Years Integrated - M.Tech)': 'CJ',
+  'Computer Science Engineering 5 Years Integrated': 'CJ',
+  'M.Tech. Computer Science and Engineering (5 Years Integrated)': 'CJ',
+  'M.Tech Computer Science and Engineering (5 Years Integrated)': 'CJ',
+
+  // Master Programs (Official Mappings)
+  'Big Data Analytics (M.E.)': 'BD',
+  'Big Data Analytics': 'BD',
+  'M.E. Big Data Analytics': 'BD',
+  'CAD/CAM Engineering (M.E.)': 'CD',
+  'CAD/CAM Engineering': 'CD',
+  'CAD/CAM': 'CD',
+  'M.E. CAD/CAM Engineering': 'CD',
+  'Communication Systems (M.E.)': 'CO',
+  'Communication Systems': 'CO',
+  'M.E. Communication Systems': 'CO',
+  'Computer Science and Engineering (M.E.)': 'CS',
+  'M.E. Computer Science and Engineering': 'CS',
+  'Power Electronics and Drives (M.E.)': 'PE',
+  'Power Electronics and Drives': 'PE',
+  'M.E. Power Electronics and Drives': 'PE',
+  'Industrial Safety Engineering (M.E.)': 'IS',
+  'Industrial Safety Engineering': 'IS',
+  'M.E. Industrial Safety Engineering': 'IS',
+  'Embedded System Technologies (M.E.)': 'ES',
+  'Embedded System Technologies': 'ES',
+  'M.E. Embedded System Technologies': 'ES',
+  'Computer Science and Engineering With Specialization in Networks (M.E.)': 'CN',
+  'Computer Science and Engineering With Specialization in Networks': 'CN',
+  'Computer Science and Engineering (Networks)': 'CN',
+  'M.E. Computer Science and Engineering With Specialization in Networks': 'CN',
+  'Defence Technology (M.E.)': 'DT',
+  'Defence Technology': 'DT',
+  'M.E. Defence Technology': 'DT',
+  'Master of Business Administration (MBA)': 'MBA',
+  'Master of Business Administration': 'MBA',
+  'MBA': 'MBA',
 };
 
 /**
- * Converts any department name into its clean, concise short representation (e.g., CSE, MECH, IT, AIML, FED).
+ * Converts any department name into its clean, concise short representation (e.g., CSE, MECH, IT, AIML, FED, BD, CD, CO, PE, IS, ES, CN, DT, MBA).
  */
 export function formatDepartmentShort(dept?: string | null): string {
   if (!dept) return '—';
   const clean = dept.trim();
   const upper = clean.toUpperCase();
 
-  // If already a recognized short code (or short string like FED, IT, MECH)
+  // If already a recognized short code (or short string like FED, IT, MECH, BD, CD, CO, PE, IS, ES, CN, DT, MBA)
   if (SHORT_CODE_TO_FULL_NAME[upper]) {
-    return upper === 'ME' ? 'MECH' : upper;
+    if (upper === 'ME') return 'MECH';
+    if (upper === 'MG') return 'MBA';
+    return upper;
   }
   if (clean.length <= 5) {
     return upper;

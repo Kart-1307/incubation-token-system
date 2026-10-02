@@ -4,30 +4,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Badge from '@/components/Badge';
 import { getStudentsBundle, createStudent, updateStudent, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 
-const UNDERGRAD_DEPARTMENTS = [
-  'Civil Engineering',
-  'Computer Science and Engineering',
-  'Electrical and Electronics Engineering',
-  'Electronics and Communication Engineering',
-  'Electronics and Instrumentation Engineering',
-  'Mechanical Engineering',
-  'Mechatronics Engineering',
-  'Computer and Communication Engineering',
-  'Computer Science and Engineering (Artificial Intelligence and Machine Learning)',
-  'Computer Science and Engineering (Cyber Security)',
-  'Computer Science and Engineering (Internet of Things)',
-  'Information Technology (B.Tech)',
-  'Artificial Intelligence and Data Science (B.Tech)',
-  'Computer Science and Business Systems (B.Tech)',
-];
+import {
+  UNDERGRAD_DEPARTMENTS,
+  POSTGRAD_DEPARTMENTS,
+  ALL_DEPARTMENTS,
+} from '@/utils/departmentUtils';
 
-const POSTGRAD_DEPARTMENTS = [
-  'Integrated & Postgraduate Programs (M.E. / M.Tech)',
-];
-
-const ALL_DEPARTMENTS = [...UNDERGRAD_DEPARTMENTS, ...POSTGRAD_DEPARTMENTS];
-
-const years = ['All', '1', '2', '3', '4'];
+const years = ['All', '1', '2', '3', '4', '5'];
 
 type View = 'list' | 'detail';
 
@@ -398,8 +381,8 @@ export default function Students() {
           className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
         >
           <option value="All">All Course Types</option>
-          <option value="Bachelor">Bachelor (UG)</option>
-          <option value="Master">Master (PG)</option>
+          <option value="Bachelor">Bachelor</option>
+          <option value="Master">Master</option>
         </select>
         <select
           value={deptFilter}
@@ -407,12 +390,12 @@ export default function Students() {
           className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white max-w-xs"
         >
           <option value="All">All Departments</option>
-          <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+          <optgroup label="Bachelor Programs (B.E. / B.Tech)">
             {UNDERGRAD_DEPARTMENTS.map(d => (
               <option key={d} value={d}>{d}</option>
             ))}
           </optgroup>
-          <optgroup label="Integrated & Postgraduate Programs (M.E. / M.Tech)">
+          <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
             {POSTGRAD_DEPARTMENTS.map(d => (
               <option key={d} value={d}>{d}</option>
             ))}
@@ -620,13 +603,13 @@ export default function Students() {
                         year: '1',
                       }));
                     }}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer text-center ${
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
                       form.courseType === 'Bachelor'
                         ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
                         : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    🎓 Bachelor (UG - 4 Yrs)
+                    🎓 Bachelor
                   </button>
                   <button
                     type="button"
@@ -638,13 +621,13 @@ export default function Students() {
                         year: '1',
                       }));
                     }}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer text-center ${
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
                       form.courseType === 'Master'
                         ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
                         : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    📜 Master (PG - 2 Yrs)
+                    📜 Master
                   </button>
                 </div>
               </div>
@@ -652,7 +635,7 @@ export default function Students() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    {form.courseType === 'Master' ? 'Postgraduate Program *' : 'Department *'}
+                    {form.courseType === 'Master' ? 'Master Program *' : 'Department *'}
                   </label>
                   <select
                     value={form.department}
@@ -660,13 +643,13 @@ export default function Students() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
                     {form.courseType === 'Master' ? (
-                      <optgroup label="Postgraduate Programs (M.E. / M.Tech)">
+                      <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
                         {POSTGRAD_DEPARTMENTS.map(d => (
                           <option key={d} value={d}>{d}</option>
                         ))}
                       </optgroup>
                     ) : (
-                      <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+                      <optgroup label="Bachelor Programs (B.E. / B.Tech)">
                         {UNDERGRAD_DEPARTMENTS.map(d => (
                           <option key={d} value={d}>{d}</option>
                         ))}
@@ -681,7 +664,12 @@ export default function Students() {
                     onChange={e => setForm(p => ({ ...p, year: e.target.value }))}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    {(form.courseType === 'Master' ? ['1', '2'] : ['1', '2', '3', '4']).map(y => (
+                    {(form.department.includes('Integrated')
+                      ? ['1', '2', '3', '4', '5']
+                      : form.courseType === 'Master'
+                      ? ['1', '2']
+                      : ['1', '2', '3', '4']
+                    ).map(y => (
                       <option key={y} value={y}>Year {y}</option>
                     ))}
                   </select>
@@ -759,17 +747,17 @@ export default function Students() {
                       setEditForm(p => ({
                         ...p,
                         courseType: 'Bachelor',
-                        department: UNDERGRAD_DEPARTMENTS.includes(p.department) ? p.department : UNDERGRAD_DEPARTMENTS[0],
+                        department: (UNDERGRAD_DEPARTMENTS as readonly string[]).includes(p.department) ? p.department : UNDERGRAD_DEPARTMENTS[0],
                         year: Number(p.year) > 4 ? '4' : p.year,
                       }));
                     }}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer text-center ${
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
                       editForm.courseType === 'Bachelor'
                         ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
                         : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    🎓 Bachelor (UG - 4 Yrs)
+                    🎓 Bachelor
                   </button>
                   <button
                     type="button"
@@ -777,17 +765,17 @@ export default function Students() {
                       setEditForm(p => ({
                         ...p,
                         courseType: 'Master',
-                        department: POSTGRAD_DEPARTMENTS.includes(p.department) ? p.department : POSTGRAD_DEPARTMENTS[0],
-                        year: Number(p.year) > 2 ? '2' : p.year,
+                        department: (POSTGRAD_DEPARTMENTS as readonly string[]).includes(p.department) ? p.department : POSTGRAD_DEPARTMENTS[0],
+                        year: p.department.includes('Integrated') ? (Number(p.year) > 5 ? '5' : p.year) : Number(p.year) > 2 ? '2' : p.year,
                       }));
                     }}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer text-center ${
+                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
                       editForm.courseType === 'Master'
                         ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
                         : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    📜 Master (PG - 2 Yrs)
+                    📜 Master
                   </button>
                 </div>
               </div>
@@ -796,7 +784,7 @@ export default function Students() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    {editForm.courseType === 'Master' ? 'Postgraduate Program *' : 'Department *'}
+                    {editForm.courseType === 'Master' ? 'Master Program *' : 'Department *'}
                   </label>
                   <select
                     value={editForm.department}
@@ -804,13 +792,13 @@ export default function Students() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
                     {editForm.courseType === 'Master' ? (
-                      <optgroup label="Postgraduate Programs (M.E. / M.Tech)">
+                      <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
                         {POSTGRAD_DEPARTMENTS.map(d => (
                           <option key={d} value={d}>{d}</option>
                         ))}
                       </optgroup>
                     ) : (
-                      <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+                      <optgroup label="Bachelor Programs (B.E. / B.Tech)">
                         {UNDERGRAD_DEPARTMENTS.map(d => (
                           <option key={d} value={d}>{d}</option>
                         ))}
@@ -825,7 +813,12 @@ export default function Students() {
                     onChange={e => setEditForm(p => ({ ...p, year: e.target.value }))}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    {(editForm.courseType === 'Master' ? ['1', '2'] : ['1', '2', '3', '4']).map(y => (
+                    {(editForm.department.includes('Integrated')
+                      ? ['1', '2', '3', '4', '5']
+                      : editForm.courseType === 'Master'
+                      ? ['1', '2']
+                      : ['1', '2', '3', '4']
+                    ).map(y => (
                       <option key={y} value={y}>Year {y}</option>
                     ))}
                   </select>
