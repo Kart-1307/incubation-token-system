@@ -1,9 +1,12 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDepartmentShort, formatYearRoman } from './departmentUtils';
 
 export interface StudentInfo {
   studentId: string;
   name: string;
+  department?: string;
+  year?: number | string;
 }
 
 export interface EditableLetterContent {
@@ -23,6 +26,9 @@ export interface EditableLetterContent {
   page2Title?: string;
   page2Subtitle?: string;
   studentsList?: StudentInfo[];
+  breakfastCount?: number | string;
+  lunchCount?: number | string;
+  dinnerCount?: number | string;
 }
 
 export function generateFoodRequestLetterPdf(
@@ -154,7 +160,7 @@ export function generateFoodRequestLetterPdf(
 
   // ==========================================
   // PAGE 2: STUDENT DETAILS TABLE
-  // (Attachment: List of Students)
+  // (Attachment: List of Students matching handwritten reference)
   // ==========================================
   doc.addPage('a4', 'portrait');
 
@@ -174,22 +180,23 @@ export function generateFoodRequestLetterPdf(
 
   p2CursorY += 8;
 
-  // Table Data: exactly 3 columns
+  // Table Data: 5 columns: S.no, Name, College ID, Dept, Year
   const tableData = finalStudents.map((st, index) => [
     String(index + 1),
     st.name,
     st.studentId,
+    formatDepartmentShort(st.department),
+    formatYearRoman(st.year),
   ]);
 
-  // Centered compact table: 140mm wide
-  const tableMarginX = 35;
+  const tableMarginX = 25;
 
   autoTable(doc, {
     startY: p2CursorY,
-    head: [['S.No', 'Student Name', 'Student ID']],
+    head: [['S.no', 'Name', 'College ID', 'Dept', 'Year']],
     body: tableData,
     margin: { left: tableMarginX, right: tableMarginX },
-    tableWidth: 140,
+    tableWidth: 160,
     styles: {
       font: 'helvetica',
       fontSize: 9.5,
@@ -209,14 +216,55 @@ export function generateFoodRequestLetterPdf(
       fontSize: 10,
     },
     columnStyles: {
-      0: { cellWidth: 16, halign: 'center', font: 'helvetica' },
-      1: { cellWidth: 80, halign: 'left', font: 'helvetica' },
-      2: { cellWidth: 44, halign: 'center', fontStyle: 'bold', font: 'helvetica' },
+      0: { cellWidth: 14, halign: 'center', font: 'helvetica' },
+      1: { cellWidth: 62, halign: 'left', font: 'helvetica' },
+      2: { cellWidth: 36, halign: 'center', fontStyle: 'bold', font: 'helvetica' },
+      3: { cellWidth: 28, halign: 'center', fontStyle: 'bold', font: 'helvetica' },
+      4: { cellWidth: 20, halign: 'center', fontStyle: 'bold', font: 'helvetica' },
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
   });
+
+  // Bottom Meal Consumption Summary (Matching B - 19, L - 18, D - 6)
+  const finalY = (doc as any).lastAutoTable?.finalY || (p2CursorY + 60);
+  let summaryY = Math.min(finalY + 10, 240);
+
+  doc.setFont('times', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Meal Consumption Summary:', tableMarginX, summaryY);
+
+  summaryY += 6;
+  doc.setFont('times', 'bold');
+  doc.setFontSize(10);
+  doc.text(`B – ${customLetter?.breakfastCount ?? 0}`, tableMarginX, summaryY);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100);
+  doc.text('(Breakfast consumed already)', tableMarginX + 18, summaryY);
+  doc.setTextColor(30, 41, 59);
+
+  summaryY += 5;
+  doc.setFont('times', 'bold');
+  doc.setFontSize(10);
+  doc.text(`L – ${customLetter?.lunchCount ?? 0}`, tableMarginX, summaryY);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100);
+  doc.text('(Lunch consumed already)', tableMarginX + 18, summaryY);
+  doc.setTextColor(30, 41, 59);
+
+  summaryY += 5;
+  doc.setFont('times', 'bold');
+  doc.setFontSize(10);
+  doc.text(`D – ${customLetter?.dinnerCount ?? finalStudents.length}`, tableMarginX, summaryY);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100);
+  doc.text('(Dinner to be consumed tonight)', tableMarginX + 18, summaryY);
+  doc.setTextColor(0);
 
   // Footer for Page 2
   doc.setFont('times', 'normal');
@@ -229,3 +277,4 @@ export function generateFoodRequestLetterPdf(
   const cleanDate = formattedDate.replace(/\//g, '-');
   doc.save(`Food_Request_Letter_${cleanDate}.pdf`);
 }
+

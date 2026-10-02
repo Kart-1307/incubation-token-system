@@ -1954,6 +1954,8 @@ function DailyFoodListContent() {
         studentsList={(currentList?.entries ?? []).map(entry => ({
           studentId: entry.studentId,
           name: entry.studentName,
+          department: entry.department,
+          year: entry.year,
         }))}
       />
 

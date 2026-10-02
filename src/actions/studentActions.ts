@@ -9,6 +9,7 @@ import { getTodayISTDateString, formatISTTime, getTokenEffectiveSession, getMeal
 export interface StudentRecord {
   id: string;
   name: string;
+  courseType: string;
   department: string;
   year: number;
   email: string;
@@ -38,6 +39,7 @@ export async function getStudents(): Promise<StudentRecord[]> {
       return list.map((s: any) => ({
         id: s.id,
         name: s.name,
+        courseType: s.courseType || 'Bachelor',
         department: normalizeDepartmentName(s.department),
         year: s.year,
         email: s.email,
@@ -70,6 +72,7 @@ export async function getStudentById(idInput: string) {
 export async function createStudent(data: {
   id: string;
   name: string;
+  courseType?: string;
   department: string;
   year: number;
   email: string;
@@ -79,6 +82,7 @@ export async function createStudent(data: {
   const id = data.id.trim().toUpperCase();
   const name = data.name.trim();
   const email = data.email.trim();
+  const courseType = data.courseType ? data.courseType.trim() : 'Bachelor';
 
   if (!id || !name || !email) {
     return { success: false, message: 'Student ID, Name, and Email are required.' };
@@ -99,6 +103,7 @@ export async function createStudent(data: {
       data: {
         id,
         name,
+        courseType,
         department: canonicalDept,
         year: Number(data.year) || 1,
         email,
@@ -116,6 +121,7 @@ export async function createStudent(data: {
       student: {
         id: created.id,
         name: created.name,
+        courseType: created.courseType,
         department: created.department,
         year: created.year,
         email: created.email,
@@ -567,6 +573,7 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
       const formattedStudents: StudentRecord[] = students.map((s: any) => ({
         id: s.id,
         name: s.name,
+        courseType: s.courseType || 'Bachelor',
         department: normalizeDepartmentName(s.department),
         year: s.year,
         email: s.email,
@@ -633,6 +640,7 @@ export async function getStudentsBundle(): Promise<{ students: StudentRecord[]; 
       const formattedStudents: StudentRecord[] = students.map((s: any) => ({
         id: s.id,
         name: s.name,
+        courseType: s.courseType || 'Bachelor',
         department: normalizeDepartmentName(s.department),
         year: s.year,
         email: s.email,

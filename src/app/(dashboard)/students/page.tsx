@@ -65,6 +65,7 @@ export default function Students() {
   const [projectList, setProjectList] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
   const [loading, setLoading] = useState(() => !initialCache);
   const [search, setSearch] = useState('');
+  const [courseFilter, setCourseFilter] = useState('All');
   const [deptFilter, setDeptFilter] = useState('All');
   const [yearFilter, setYearFilter] = useState('All');
   const [view, setView] = useState<View>('list');
@@ -76,8 +77,9 @@ export default function Students() {
   const [form, setForm] = useState({
     id: '',
     name: '',
+    courseType: 'Bachelor',
     department: 'Computer Science and Engineering',
-    year: '3',
+    year: '1',
     email: '',
     phone: '',
     status: 'Active',
@@ -127,6 +129,7 @@ export default function Students() {
   const filtered = studentList.filter(s => {
     const q = search.toLowerCase();
     const matchQ = !q || s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    const matchCourse = courseFilter === 'All' || (s.courseType || 'Bachelor') === courseFilter;
     const matchDept =
       deptFilter === 'All' ||
       s.department === deptFilter ||
@@ -136,7 +139,7 @@ export default function Students() {
       (deptFilter === 'Electrical and Electronics Engineering' && s.department === 'EEE') ||
       (deptFilter === 'Civil Engineering' && s.department === 'Civil');
     const matchYear = yearFilter === 'All' || String(s.year) === yearFilter;
-    return matchQ && matchDept && matchYear;
+    return matchQ && matchCourse && matchDept && matchYear;
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -144,7 +147,7 @@ export default function Students() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, deptFilter, yearFilter]);
+  }, [search, courseFilter, deptFilter, yearFilter]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const startIndex = (currentPage - 1) * PAGE_SIZE;
@@ -159,6 +162,7 @@ export default function Students() {
     const res = await createStudent({
       id: form.id,
       name: form.name,
+      courseType: form.courseType,
       department: form.department,
       year: Number(form.year),
       email: form.email,
@@ -168,7 +172,7 @@ export default function Students() {
 
     if (res.success) {
       showToast(res.message);
-      setForm({ id: '', name: '', department: 'Computer Science and Engineering', year: '3', email: '', phone: '', status: 'Active' });
+      setForm({ id: '', name: '', courseType: 'Bachelor', department: 'Computer Science and Engineering', year: '1', email: '', phone: '', status: 'Active' });
       setFormError('');
       setShowAdd(false);
       await loadData();
@@ -222,6 +226,7 @@ export default function Students() {
             </div>
             <div className="space-y-2 text-sm">
               {[
+                { l: 'Course Type', v: selected.courseType || 'Bachelor' },
                 { l: 'Department', v: selected.department },
                 { l: 'Year', v: `Year ${selected.year}` },
                 { l: 'Email', v: selected.email },
@@ -301,6 +306,15 @@ export default function Students() {
           className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-72 bg-white"
         />
         <select
+          value={courseFilter}
+          onChange={e => setCourseFilter(e.target.value)}
+          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+        >
+          <option value="All">All Course Types</option>
+          <option value="Bachelor">Bachelor (UG)</option>
+          <option value="Master">Master (PG)</option>
+        </select>
+        <select
           value={deptFilter}
           onChange={e => setDeptFilter(e.target.value)}
           className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white max-w-xs"
@@ -351,7 +365,7 @@ export default function Students() {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="text-center py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-14">S.No</th>
-                  {['Roll No / ID', 'Name', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
+                  {['Roll No / ID', 'Name', 'Course', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
                     <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -362,6 +376,15 @@ export default function Students() {
                     <td className="py-3 px-3 text-xs text-slate-500 font-medium text-center">{startIndex + idx + 1}</td>
                     <td className="py-3 px-4 text-xs text-indigo-700 font-semibold tracking-wide font-mono">{s.id}</td>
                     <td className="py-3 px-4 font-medium text-slate-800">{s.name}</td>
+                    <td className="py-3 px-4 text-xs">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                        s.courseType === 'Master'
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-sky-50 text-sky-700 border-sky-200'
+                      }`}>
+                        {s.courseType || 'Bachelor'}
+                      </span>
+                    </td>
                     <td className="py-3 px-4 text-slate-600 text-xs">{s.department}</td>
                     <td className="py-3 px-4 text-slate-600 text-xs">Year {s.year}</td>
                     <td className="py-3 px-4 text-slate-500 text-xs font-mono">{s.email}</td>
@@ -490,30 +513,83 @@ export default function Students() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Course Type *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(p => ({
+                        ...p,
+                        courseType: 'Bachelor',
+                        department: UNDERGRAD_DEPARTMENTS[0],
+                        year: '1',
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer text-center ${
+                      form.courseType === 'Bachelor'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    🎓 Bachelor (UG - 4 Yrs)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(p => ({
+                        ...p,
+                        courseType: 'Master',
+                        department: POSTGRAD_DEPARTMENTS[0],
+                        year: '1',
+                      }));
+                    }}
+                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer text-center ${
+                      form.courseType === 'Master'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
+                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    📜 Master (PG - 2 Yrs)
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Department *</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {form.courseType === 'Master' ? 'Postgraduate Program *' : 'Department *'}
+                  </label>
                   <select
                     value={form.department}
                     onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
-                    <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
-                      {UNDERGRAD_DEPARTMENTS.map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Integrated & Postgraduate Programs (M.E. / M.Tech)">
-                      {POSTGRAD_DEPARTMENTS.map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </optgroup>
+                    {form.courseType === 'Master' ? (
+                      <optgroup label="Postgraduate Programs (M.E. / M.Tech)">
+                        {POSTGRAD_DEPARTMENTS.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      <optgroup label="Undergraduate Programs (B.E. / B.Tech)">
+                        {UNDERGRAD_DEPARTMENTS.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Year *</label>
-                  <select value={form.year} onChange={e => setForm(p => ({ ...p, year: e.target.value }))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    {['1', '2', '3', '4'].map(y => <option key={y} value={y}>Year {y}</option>)}
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Year of Study *</label>
+                  <select
+                    value={form.year}
+                    onChange={e => setForm(p => ({ ...p, year: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {(form.courseType === 'Master' ? ['1', '2'] : ['1', '2', '3', '4']).map(y => (
+                      <option key={y} value={y}>Year {y}</option>
+                    ))}
                   </select>
                 </div>
               </div>

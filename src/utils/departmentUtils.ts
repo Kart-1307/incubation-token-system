@@ -48,7 +48,85 @@ const SHORT_CODE_TO_FULL_NAME: Record<string, string> = {
   IOT: 'Computer Science and Engineering (Internet of Things)',
   MTRX: 'Mechatronics Engineering',
   MTS: 'Mechatronics Engineering',
+  FED: 'Foundational Engineering Department',
 };
+
+const FULL_NAME_TO_SHORT_CODE: Record<string, string> = {
+  'Computer Science and Engineering': 'CSE',
+  'Mechanical Engineering': 'MECH',
+  'Electronics and Communication Engineering': 'ECE',
+  'Electrical and Electronics Engineering': 'EEE',
+  'Electronics and Instrumentation Engineering': 'EIE',
+  'Civil Engineering': 'CIVIL',
+  'Computer and Communication Engineering': 'CCE',
+  'Information Technology (B.Tech)': 'IT',
+  'Information Technology': 'IT',
+  'Artificial Intelligence and Data Science (B.Tech)': 'AIDS',
+  'Artificial Intelligence and Data Science': 'AIDS',
+  'Computer Science and Business Systems (B.Tech)': 'CSBS',
+  'Computer Science and Business Systems': 'CSBS',
+  'Computer Science and Engineering (Artificial Intelligence and Machine Learning)': 'AIML',
+  'Computer Science and Engineering (Cyber Security)': 'CYBER',
+  'Computer Science and Engineering (Internet of Things)': 'IOT',
+  'Mechatronics Engineering': 'MTRX',
+  'Foundational Engineering Department': 'FED',
+  'Integrated & Postgraduate Programs (M.E. / M.Tech)': 'PG',
+};
+
+/**
+ * Converts any department name into its clean, concise short representation (e.g., CSE, MECH, IT, AIML, FED).
+ */
+export function formatDepartmentShort(dept?: string | null): string {
+  if (!dept) return '—';
+  const clean = dept.trim();
+  const upper = clean.toUpperCase();
+
+  // If already a recognized short code (or short string like FED, IT, MECH)
+  if (SHORT_CODE_TO_FULL_NAME[upper]) {
+    return upper === 'ME' ? 'MECH' : upper;
+  }
+  if (clean.length <= 5) {
+    return upper;
+  }
+
+  // Check full name mapping
+  const normalized = normalizeDepartmentName(clean);
+  if (FULL_NAME_TO_SHORT_CODE[normalized]) {
+    return FULL_NAME_TO_SHORT_CODE[normalized];
+  }
+  if (FULL_NAME_TO_SHORT_CODE[clean]) {
+    return FULL_NAME_TO_SHORT_CODE[clean];
+  }
+
+  // Fallback: if ends with parenthetical short code e.g. "Information Technology (B.Tech)"
+  return clean.length > 10 ? clean.split(' ')[0].toUpperCase() : clean;
+}
+
+/**
+ * Converts numeric year (1, 2, 3, 4) to Roman numerals (I, II, III, IV) matching handwritten letters.
+ */
+export function formatYearRoman(year?: number | string | null): string {
+  if (year === undefined || year === null || year === '' || year === 0) return '—';
+  const str = String(year).trim().toUpperCase();
+  const romanMap: Record<string, string> = {
+    '1': 'I',
+    '2': 'II',
+    '3': 'III',
+    '4': 'IV',
+    '5': 'V',
+    'YEAR 1': 'I',
+    'YEAR 2': 'II',
+    'YEAR 3': 'III',
+    'YEAR 4': 'IV',
+    'YEAR 5': 'V',
+    'I': 'I',
+    'II': 'II',
+    'III': 'III',
+    'IV': 'IV',
+    'V': 'V',
+  };
+  return romanMap[str] || str;
+}
 
 /**
  * Normalizes any department input (abbreviation, short code, or partial) to its canonical full form.
@@ -70,3 +148,4 @@ export function normalizeDepartmentName(dept?: string | null): string {
   // 3. Fallback to clean string
   return clean;
 }
+
