@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import TokenPrintSlip from '@/components/TokenPrintSlip';
+import TokenPrintSlip, { type TokenPrintData } from '@/components/TokenPrintSlip';
+import PrinterSettingsModal from '@/components/PrinterSettingsModal';
+import TokenSlipModal from '@/components/TokenSlipModal';
+import { generateQrCodeDataUrl } from '@/utils/thermalPrinterUtils';
 import { verifyStudentScan, issueFoodToken, type VerificationResult } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getMealSession, getTodayISTDateString, getPreviousISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
@@ -41,6 +44,10 @@ export default function ScanToken() {
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
   const [yesterdayFoodListInfo, setYesterdayFoodListInfo] = useState<FoodListDetails | null>(null);
   const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
+  const [testPrintToken, setTestPrintToken] = useState<TokenPrintData | null>(null);
+  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
+  const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
+  const [previewQrCode, setPreviewQrCode] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('hardware_scanner_sound');
@@ -279,6 +286,27 @@ export default function ScanToken() {
     playTerminalChime('success');
   };
 
+  useEffect(() => {
+    if (generatedToken) {
+      const payload = JSON.stringify({
+        tok: generatedToken.tokenNumber,
+        sid: generatedToken.studentId,
+        ses: generatedToken.session,
+        dt: generatedToken.date,
+      });
+      generateQrCodeDataUrl(payload, 120).then(setPreviewQrCode);
+    } else {
+      setPreviewQrCode('');
+    }
+  }, [generatedToken]);
+
+  const handleTriggerTestPrint = (testToken: TokenPrintData) => {
+    setTestPrintToken(testToken);
+    setTimeout(() => {
+      window.print();
+    }, 250);
+  };
+
   const reset = () => {
     setScannedId('');
     setState('idle');
@@ -286,13 +314,14 @@ export default function ScanToken() {
     setProjectName('');
     setMessage('');
     setGeneratedToken(null);
+    setTestPrintToken(null);
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Portal Container for Thermal Receipt Printing */}
-      <TokenPrintSlip token={generatedToken} />
+      <TokenPrintSlip token={testPrintToken || generatedToken} />
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -303,12 +332,22 @@ export default function ScanToken() {
           </p>
         </div>
 
-        {/* Hardware Scanner Active Status Badge & Sound Toggle */}
+        {/* Hardware Scanner Active Status Badge, Printer Setup & Sound Toggle */}
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>⚡ Hardware Scanner Active</span>
+            <span>⚡ Scanner Active</span>
           </span>
+
+          <button
+            type="button"
+            onClick={() => setIsPrinterModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
+            title="Thermal Printer Settings & Diagnostic Test Slip"
+          >
+            <span>🖨️</span>
+            <span>Printer Settings</span>
+          </button>
 
           <button
             type="button"
@@ -762,7 +801,15 @@ export default function ScanToken() {
                 </div>
               </div>
 
-              <div className="text-center text-[10px] text-slate-500 pt-1">
+              {/* Scannable Verification QR Code in Preview */}
+              {previewQrCode && (
+                <div className="my-2 flex flex-col items-center justify-center">
+                  <img src={previewQrCode} alt="QR Preview" className="w-20 h-20 object-contain" />
+                  <div className="text-[8px] text-slate-400 font-mono mt-0.5">SCAN AT MESS COUNTER</div>
+                </div>
+              )}
+
+              <div className="text-center text-[10px] text-slate-500 pt-1 border-t border-dashed border-slate-200">
                 <div>Present this slip at mess counter</div>
                 <div>Valid for 1 meal only · Non-transferable</div>
               </div>
@@ -772,15 +819,26 @@ export default function ScanToken() {
           <div className="flex gap-3">
             <button
               onClick={() => window.print()}
-              className="flex-1 border border-slate-300 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
+              className="flex-1 border border-slate-300 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-center gap-2"
             >
-              Print Slip
+              <span>🖨️</span>
+              <span>Print Slip</span>
             </button>
             <button
               onClick={reset}
               className="flex-1 bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-800 transition-colors shadow-xs cursor-pointer"
             >
               Scan Next Student
+            </button>
+          </div>
+
+          <div className="text-center pt-1">
+            <button
+              type="button"
+              onClick={() => setState('printer-failure')}
+              className="text-xs text-slate-400 hover:text-amber-700 transition-colors cursor-pointer underline underline-offset-2"
+            >
+              Printer did not respond or jammed? View troubleshooting & retry
             </button>
           </div>
         </div>
@@ -877,9 +935,10 @@ export default function ScanToken() {
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => window.print()}
-                className="flex-1 border border-slate-300 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
+                className="flex-1 border border-slate-300 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-center gap-2"
               >
-                Print Token Slip
+                <span>🖨️</span>
+                <span>Print Token Slip</span>
               </button>
               <button
                 onClick={reset}
@@ -892,8 +951,82 @@ export default function ScanToken() {
         </div>
       )}
 
+      {/* PRINTER FAILURE STATE (Figma Section 30) */}
+      {state === 'printer-failure' && (
+        <div className="bg-white border border-amber-300 rounded-xl shadow-xs overflow-hidden animate-in fade-in duration-200">
+          <div className="bg-amber-50 border-b border-amber-200 p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 mx-auto flex items-center justify-center text-2xl font-bold mb-2">
+              ⚠
+            </div>
+            <h3 className="text-lg font-bold text-amber-900">Printing Failed</h3>
+            <p className="text-xs text-amber-800 mt-1 max-w-md mx-auto">
+              The food token was generated, but the thermal printer did not respond.
+            </p>
+          </div>
+
+          <div className="p-6 space-y-4">
+            {/* Database Reassurance: Clarify token was safely created */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-800 flex items-start gap-2.5">
+              <span className="text-emerald-600 font-bold text-sm">✓</span>
+              <div>
+                <strong className="font-semibold text-emerald-950">Meal Token Recorded in Database:</strong>
+                <p className="mt-0.5 text-emerald-800">
+                  The food token has already been successfully registered for{' '}
+                  <span className="font-bold text-slate-900">{generatedToken?.studentName || student?.name}</span> ({generatedToken?.studentId || student?.id}). The counter record is valid.
+                </p>
+              </div>
+            </div>
+
+            {/* Token Badge */}
+            {generatedToken && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                  Valid Token Number
+                </div>
+                <div className="text-2xl font-black font-mono text-indigo-950 tracking-wider">
+                  {generatedToken.tokenNumber}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Session: <span className="font-bold uppercase text-slate-800">{generatedToken.session || currentMealSession}</span> · Issued: <span className="font-semibold">{formatISTTime(generatedToken.time)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="space-y-2.5 pt-2">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex-1 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-sm font-semibold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>🖨️</span>
+                  <span>Retry Print</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSlipModalOpen(true)}
+                  className="flex-1 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>🧾</span>
+                  <span>View Token Slip</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={reset}
+                className="w-full py-2.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg text-xs font-semibold transition-colors cursor-pointer text-center"
+              >
+                Print Again Later & Scan Next Student →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FAIL-SAFE FALLBACK CARD (Guarantees screen is never blank if in any unhandled state) */}
-      {!['idle', 'scanning', 'found-eligible', 'generating', 'token-generated', 'found-not-eligible', 'not-found', 'duplicate'].includes(state) && (
+      {!['idle', 'scanning', 'found-eligible', 'generating', 'token-generated', 'found-not-eligible', 'not-found', 'duplicate', 'printer-failure'].includes(state) && (
         <div className="bg-white border border-slate-200 rounded-xl p-8 text-center shadow-xs space-y-3">
           <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-600 mx-auto flex items-center justify-center text-2xl font-bold mb-2">
             🔄
@@ -910,6 +1043,20 @@ export default function ScanToken() {
           </button>
         </div>
       )}
+
+      {/* Printer Configuration Modal */}
+      <PrinterSettingsModal
+        isOpen={isPrinterModalOpen}
+        onClose={() => setIsPrinterModalOpen(false)}
+        onTriggerTestPrint={handleTriggerTestPrint}
+      />
+
+      {/* Slip Modal Preview */}
+      <TokenSlipModal
+        isOpen={isSlipModalOpen}
+        token={generatedToken}
+        onClose={() => setIsSlipModalOpen(false)}
+      />
 
 
 

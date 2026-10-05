@@ -67,6 +67,11 @@ nextjs-portal {
 }
 
 @media print {
+  @page {
+    margin: 0mm;
+    size: auto;
+  }
+
   /* Hide unrelated application elements when printing letter or thermal slip */
   body > *:not(#food-letter-printable):not(#token-slip-printable):not(.token-printable-container) {
     display: none !important;
@@ -94,14 +99,24 @@ nextjs-portal {
   #token-slip-printable, .token-printable-container {
     display: block !important;
     position: static !important;
-    width: 80mm !important;
-    max-width: 80mm !important;
     margin: 0 auto !important;
-    padding: 4mm !important;
+    padding: 2.5mm !important;
     background: white !important;
     color: black !important;
     box-shadow: none !important;
     border: none !important;
+    image-rendering: -webkit-optimize-contrast !important;
+    image-rendering: pixelated !important;
+  }
+
+  #token-slip-printable.slip-80mm {
+    width: 80mm !important;
+    max-width: 80mm !important;
+  }
+
+  #token-slip-printable.slip-58mm {
+    width: 58mm !important;
+    max-width: 58mm !important;
   }
 
   .print-page-1 {
