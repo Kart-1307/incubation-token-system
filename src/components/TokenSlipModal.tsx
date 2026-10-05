@@ -85,21 +85,32 @@ export default function TokenSlipModal({ token, isOpen, onClose }: TokenSlipModa
             {/* Details */}
             <div className="space-y-1.5 border-t border-b border-dashed border-slate-300 py-2.5 my-2 text-[11px]">
               <div className="flex justify-between gap-1">
-                <span className="text-slate-500">STUDENT:</span>
+                <span className="text-slate-500">
+                  {token.category === 'Intern' || token.studentId.startsWith('INT-') ? 'INTERN:' : 'STUDENT:'}
+                </span>
                 <span className="font-bold text-right truncate">{token.studentName}</span>
               </div>
               <div className="flex justify-between gap-1">
                 <span className="text-slate-500">ID NO:</span>
                 <span className="font-bold font-mono text-right">{token.studentId}</span>
               </div>
-              {token.department && (
+              {token.category === 'Intern' || token.studentId.startsWith('INT-') ? (
                 <div className="flex justify-between gap-1">
-                  <span className="text-slate-500">DEPT:</span>
-                  <span className="font-bold text-right">{token.department}</span>
+                  <span className="text-slate-500">STARTUP:</span>
+                  <span className="font-bold text-right truncate">{token.startupName || token.department || 'Startup Intern'}</span>
                 </div>
+              ) : (
+                token.department && (
+                  <div className="flex justify-between gap-1">
+                    <span className="text-slate-500">DEPT:</span>
+                    <span className="font-bold text-right">{token.department}</span>
+                  </div>
+                )
               )}
               <div className="flex justify-between gap-1">
-                <span className="text-slate-500">PROJECT:</span>
+                <span className="text-slate-500">
+                  {token.category === 'Intern' || token.studentId.startsWith('INT-') ? 'AFFILIATION:' : 'PROJECT:'}
+                </span>
                 <span className="font-bold text-right truncate">{token.project}</span>
               </div>
               <div className="flex justify-between gap-1">

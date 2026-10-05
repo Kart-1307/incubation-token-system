@@ -16,6 +16,8 @@ export interface TokenPrintData {
   time: string;
   session?: string;
   isTestPrint?: boolean;
+  category?: 'Student' | 'Intern';
+  startupName?: string;
 }
 
 interface TokenPrintSlipProps {
@@ -141,21 +143,32 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
       {/* Student & Project Details Table */}
       <div className="space-y-1 my-2 border-b-2 border-black pb-2 font-mono leading-tight">
         <div className="flex justify-between items-baseline gap-1">
-          <span className="font-semibold text-slate-800">STUDENT:</span>
+          <span className="font-semibold text-slate-800">
+            {token.category === 'Intern' || token.studentId.startsWith('INT-') ? 'INTERN:' : 'STUDENT:'}
+          </span>
           <span className="font-bold text-right truncate">{token.studentName}</span>
         </div>
         <div className="flex justify-between items-baseline gap-1">
           <span className="font-semibold text-slate-800">ID NO:</span>
           <span className="font-bold text-right">{token.studentId}</span>
         </div>
-        {token.department && (
+        {token.category === 'Intern' || token.studentId.startsWith('INT-') ? (
           <div className="flex justify-between items-baseline gap-1">
-            <span className="font-semibold text-slate-800">DEPT:</span>
-            <span className="font-bold text-right">{token.department}</span>
+            <span className="font-semibold text-slate-800">STARTUP:</span>
+            <span className="font-bold text-right truncate">{token.startupName || token.department || 'Startup Intern'}</span>
           </div>
+        ) : (
+          token.department && (
+            <div className="flex justify-between items-baseline gap-1">
+              <span className="font-semibold text-slate-800">DEPT:</span>
+              <span className="font-bold text-right">{token.department}</span>
+            </div>
+          )
         )}
         <div className="flex justify-between items-baseline gap-1">
-          <span className="font-semibold text-slate-800">PROJECT:</span>
+          <span className="font-semibold text-slate-800">
+            {token.category === 'Intern' || token.studentId.startsWith('INT-') ? 'AFFILIATION:' : 'PROJECT:'}
+          </span>
           <span className="font-bold text-right truncate">{token.project}</span>
         </div>
         <div className="flex justify-between items-baseline gap-1">

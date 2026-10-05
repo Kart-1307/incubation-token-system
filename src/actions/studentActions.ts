@@ -9,13 +9,27 @@ import { getTodayISTDateString, formatISTTime, getTokenEffectiveSession, getMeal
 export interface StudentRecord {
   id: string;
   name: string;
+  category?: 'Student' | 'Intern';
   courseType: string;
   department: string;
+  startupName?: string;
   year: number;
   email: string;
   phone: string | null;
   status: 'Active' | 'Inactive';
+  mentorName?: string;
+  mentorCode?: string;
   projects: string[];
+}
+
+export interface MentorRecord {
+  code: string;
+  name: string;
+  department?: string;
+  designation?: string;
+  phone?: string;
+  status: 'Active' | 'Inactive';
+  memberCount: number;
 }
 
 export interface ProjectRecord {
@@ -32,37 +46,106 @@ export async function getStudents(): Promise<StudentRecord[]> {
     try {
       const list = await prisma.student.findMany({
         include: {
-          projectMemberships: true,
+          projectMemberships: {
+            include: { project: true },
+          },
         },
+        orderBy: { name: 'asc' },
       });
 
-      return list.map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        courseType: s.courseType || 'Bachelor',
-        department: normalizeDepartmentName(s.department),
-        year: s.year,
-        email: s.email,
-        phone: s.phone,
-        status: s.status,
-        projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
-      }));
+      return list.map((s: any) => {
+        const isIntern = s.courseType === 'Intern' || s.id.startsWith('INT-');
+        const primaryPm = s.projectMemberships?.[0];
+        const mentorName = primaryPm?.project?.name || 'Unassigned';
+        const mentorCode = primaryPm?.projectCode || undefined;
+
+        return {
+          id: s.id,
+          name: s.name,
+          category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
+          courseType: s.courseType || (isIntern ? 'Intern' : 'Bachelor'),
+          department: isIntern ? s.department : normalizeDepartmentName(s.department),
+          startupName: isIntern ? s.department : undefined,
+          year: s.year || 0,
+          email: s.email,
+          phone: s.phone,
+          status: s.status,
+          mentorName,
+          mentorCode,
+          projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
+        };
+      });
     } catch (error) {
       console.error('Error fetching students:', error);
       return [];
     }
-  }, ['students']);
+  }, ['students', 'projects']);
 }
 
 export async function getStudentById(idInput: string) {
-  const id = idInput.trim().toUpperCase();
+  const query = (idInput || '').trim();
+  if (!query) return null;
+  const upper = query.toUpperCase();
+  const digits = query.replace(/\D/g, '');
+
   try {
-    return await prisma.student.findUnique({
-      where: { id },
+    // 1. Direct ID match (e.g. 23CS101 or INT-3210)
+    let student = await prisma.student.findUnique({
+      where: { id: upper },
       include: {
-        projectMemberships: true,
+        projectMemberships: {
+          include: { project: true },
+        },
       },
     });
+
+    // 2. If not found and input is 4-6 digits (Intern phone suffix)
+    if (!student && digits.length >= 4 && digits.length <= 6) {
+      student = await prisma.student.findFirst({
+        where: {
+          OR: [
+            { id: `INT-${digits}` },
+            { id: { contains: digits } },
+            { phone: { endsWith: digits } },
+          ],
+        },
+        include: {
+          projectMemberships: {
+            include: { project: true },
+          },
+        },
+      });
+    }
+
+    // 3. If input is a 10-digit phone number
+    if (!student && digits.length >= 10) {
+      student = await prisma.student.findFirst({
+        where: {
+          phone: { contains: digits },
+        },
+        include: {
+          projectMemberships: {
+            include: { project: true },
+          },
+        },
+      });
+    }
+
+    // 4. Search by name (at least 3 characters)
+    if (!student && query.length >= 3) {
+      student = await prisma.student.findFirst({
+        where: {
+          name: { contains: query, mode: 'insensitive' },
+        },
+        include: {
+          projectMemberships: {
+            include: { project: true },
+          },
+        },
+      });
+    }
+
+    return student;
   } catch (error) {
     console.error('Error fetching student by ID:', error);
     return null;
@@ -78,6 +161,7 @@ export async function createStudent(data: {
   email: string;
   phone?: string;
   status?: string;
+  mentorCode?: string;
 }): Promise<{ success: boolean; message: string; student?: StudentRecord }> {
   const id = data.id.trim().toUpperCase();
   const name = data.name.trim();
@@ -112,7 +196,22 @@ export async function createStudent(data: {
       },
     });
 
-    appCache.invalidateTags(['students', 'dashboard']);
+    const mentorCode = (data.mentorCode || '').trim();
+    if (mentorCode) {
+      try {
+        await prisma.projectMember.create({
+          data: {
+            studentId: id,
+            projectCode: mentorCode,
+            role: 'Mentee',
+          },
+        });
+      } catch (e) {
+        console.warn('Failed to assign mentor to student', e);
+      }
+    }
+
+    appCache.invalidateTags(['students', 'dashboard', 'projects']);
     revalidatePath('/students');
     revalidatePath('/dashboard');
     return {
@@ -121,18 +220,131 @@ export async function createStudent(data: {
       student: {
         id: created.id,
         name: created.name,
+        category: 'Student',
         courseType: created.courseType,
         department: created.department,
         year: created.year,
         email: created.email,
         phone: created.phone,
-        status: created.status,
-        projects: [],
+        status: created.status as 'Active' | 'Inactive',
+        mentorName: mentorCode || 'Unassigned',
+        mentorCode: mentorCode || undefined,
+        projects: mentorCode ? [mentorCode] : [],
       },
     };
   } catch (error) {
     console.error('Error creating student:', error);
     return { success: false, message: 'Server error while creating student.' };
+  }
+}
+
+export async function createIntern(data: {
+  name: string;
+  phone: string;
+  startupName: string;
+  mentorCode?: string;
+}): Promise<{ success: boolean; message: string; student?: StudentRecord }> {
+  const name = (data.name || '').trim();
+  const rawPhone = (data.phone || '').trim();
+  const cleanPhone = rawPhone.replace(/\D/g, '');
+  const startupName = (data.startupName || '').trim() || 'Incubation Startup Intern';
+
+  if (!name) {
+    return { success: false, message: 'Intern full name is required.' };
+  }
+  if (cleanPhone.length < 4) {
+    return { success: false, message: 'Please provide a valid phone number (at least 4 digits for ID derivation).' };
+  }
+
+  const last4 = cleanPhone.slice(-4);
+  const baseId = `INT-${last4}`;
+
+  try {
+    let finalId = baseId;
+    const existingWithSamePhone = await prisma.student.findFirst({
+      where: {
+        OR: [
+          { phone: cleanPhone },
+          { id: baseId },
+        ],
+      },
+    });
+
+    if (existingWithSamePhone) {
+      if (existingWithSamePhone.phone === cleanPhone) {
+        return {
+          success: false,
+          message: `An attendee with phone ${cleanPhone} is already registered (${existingWithSamePhone.name} - ${existingWithSamePhone.id}).`,
+        };
+      }
+      let counter = 2;
+      while (await prisma.student.findUnique({ where: { id: `${baseId}-${counter}` } })) {
+        counter++;
+      }
+      finalId = `${baseId}-${counter}`;
+    }
+
+    let email = `intern.${cleanPhone}@incubation.local`;
+    const emailCollision = await prisma.student.findUnique({ where: { email } });
+    if (emailCollision) {
+      email = `intern.${finalId.toLowerCase()}.${Date.now().toString().slice(-4)}@incubation.local`;
+    }
+
+    const created = await prisma.student.create({
+      data: {
+        id: finalId,
+        name,
+        courseType: 'Intern',
+        department: startupName,
+        year: 0,
+        email,
+        phone: cleanPhone,
+        status: 'Active',
+      },
+    });
+
+    const mentorCode = (data.mentorCode || '').trim();
+    if (mentorCode) {
+      try {
+        await prisma.projectMember.create({
+          data: {
+            studentId: finalId,
+            projectCode: mentorCode,
+            role: 'Intern',
+          },
+        });
+      } catch (e) {
+        console.warn('Failed to assign mentor to intern', e);
+      }
+    }
+
+    appCache.invalidateTags(['students', 'dashboard', 'projects']);
+    revalidatePath('/students');
+    revalidatePath('/dashboard');
+    revalidatePath('/daily-food-list');
+
+    return {
+      success: true,
+      message: `✓ Registered Intern ${name} with ID ${finalId} (${startupName}).`,
+      student: {
+        id: created.id,
+        name: created.name,
+        category: 'Intern',
+        courseType: 'Intern',
+        department: created.department,
+        startupName: created.department,
+        year: 0,
+        email: created.email,
+        phone: created.phone,
+        status: 'Active',
+        mentorName: mentorCode || 'Unassigned',
+        mentorCode: mentorCode || undefined,
+        projects: mentorCode ? [mentorCode] : [],
+      },
+    };
+  } catch (error) {
+    console.error('Error creating intern:', error);
+    return { success: false, message: 'Server error while registering intern.' };
   }
 }
 
@@ -146,6 +358,7 @@ export async function updateStudent(
     email: string;
     phone?: string | null;
     status?: string;
+    mentorCode?: string;
   }
 ): Promise<{ success: boolean; message: string; student?: StudentRecord }> {
   const id = (idInput || '').trim().toUpperCase();
@@ -154,20 +367,24 @@ export async function updateStudent(
   const courseType = data.courseType ? data.courseType.trim() : 'Bachelor';
 
   if (!id) {
-    return { success: false, message: 'Student ID is required.' };
+    return { success: false, message: 'Member ID is required.' };
   }
   if (!name || !email) {
-    return { success: false, message: 'Student Name and Email are required.' };
+    return { success: false, message: 'Name and Email are required.' };
   }
 
   try {
     const existing = await prisma.student.findUnique({
       where: { id },
-      include: { projectMemberships: true },
+      include: {
+        projectMemberships: {
+          include: { project: true },
+        },
+      },
     });
 
     if (!existing) {
-      return { success: false, message: `Student with ID "${id}" not found.` };
+      return { success: false, message: `Member with ID "${id}" not found.` };
     }
 
     // Check if email conflicts with another student
@@ -181,51 +398,196 @@ export async function updateStudent(
     if (emailConflict) {
       return {
         success: false,
-        message: `Email "${email}" is already used by another student (${emailConflict.name} - ${emailConflict.id}).`,
+        message: `Email "${email}" is already used by another member (${emailConflict.name} - ${emailConflict.id}).`,
       };
     }
 
-    const canonicalDept = normalizeDepartmentName(data.department);
+    const isIntern = (data.courseType === 'Intern') || existing.courseType === 'Intern' || id.startsWith('INT-');
+    const canonicalDept = isIntern ? data.department : normalizeDepartmentName(data.department);
 
     const updated = await prisma.student.update({
       where: { id },
       data: {
         name,
-        courseType,
+        courseType: isIntern ? 'Intern' : courseType,
         department: canonicalDept,
-        year: Number(data.year) || existing.year,
+        year: isIntern ? 0 : (Number(data.year) || existing.year),
         email,
         phone: data.phone !== undefined ? data.phone : existing.phone,
         status: data.status || existing.status,
       },
       include: {
-        projectMemberships: true,
+        projectMemberships: {
+          include: { project: true },
+        },
       },
     });
+
+    if (data.mentorCode !== undefined) {
+      await prisma.projectMember.deleteMany({ where: { studentId: id } });
+      if (data.mentorCode && data.mentorCode !== 'UNASSIGNED') {
+        try {
+          await prisma.projectMember.create({
+            data: {
+              studentId: id,
+              projectCode: data.mentorCode,
+              role: isIntern ? 'Intern' : 'Mentee',
+            },
+          });
+        } catch (e) {
+          console.warn('Failed to update mentor assignment', e);
+        }
+      }
+    }
 
     appCache.invalidateTags(['students', 'dashboard', 'projects', 'food-list']);
     revalidatePath('/students');
     revalidatePath('/dashboard');
     revalidatePath('/daily-food-list');
 
+    const primaryPm = updated.projectMemberships?.[0];
+
     return {
       success: true,
-      message: `Student ${name} (${id}) updated successfully.`,
+      message: `Member ${name} (${id}) updated successfully.`,
       student: {
         id: updated.id,
         name: updated.name,
+        category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
         courseType: updated.courseType,
         department: updated.department,
+        startupName: isIntern ? updated.department : undefined,
         year: updated.year,
         email: updated.email,
         phone: updated.phone,
         status: updated.status as 'Active' | 'Inactive',
+        mentorName: primaryPm?.project?.name || 'Unassigned',
+        mentorCode: primaryPm?.projectCode || undefined,
         projects: (updated.projectMemberships || []).map((pm: any) => pm.projectCode),
       },
     };
   } catch (error) {
     console.error('Error updating student:', error);
-    return { success: false, message: 'Server error while updating student.' };
+    return { success: false, message: 'Server error while updating member.' };
+  }
+}
+
+export async function getMentors(): Promise<MentorRecord[]> {
+  return appCache.get('mentors_all', 30, async () => {
+    try {
+      const projects = await prisma.project.findMany({
+        include: {
+          members: {
+            include: { student: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+
+      return projects.map((p: any) => ({
+        code: p.code,
+        name: p.name,
+        department: p.description?.includes('·') ? p.description.split('·')[0].trim() : 'Incubation Facility',
+        designation: p.description?.includes('·') ? p.description.split('·')[1].trim() : 'Faculty Mentor / Lead',
+        phone: undefined,
+        status: p.status === 'Completed' ? 'Inactive' : 'Active',
+        memberCount: p.members?.length || 0,
+      }));
+    } catch (error) {
+      console.error('Error fetching mentors:', error);
+      return [];
+    }
+  }, ['projects', 'students']);
+}
+
+export async function createMentor(data: {
+  name: string;
+  department?: string;
+  designation?: string;
+  phone?: string;
+}): Promise<{ success: boolean; message: string; mentor?: MentorRecord }> {
+  const name = (data.name || '').trim();
+  const department = (data.department || '').trim() || 'Incubation Facility';
+  const designation = (data.designation || '').trim() || 'Faculty Mentor';
+
+  if (!name) {
+    return { success: false, message: 'Mentor name is required.' };
+  }
+
+  const slug = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 10) || 'MENTOR';
+  let code = `MTR-${slug}`;
+  let count = 1;
+  while (await prisma.project.findUnique({ where: { code } })) {
+    count++;
+    code = `MTR-${slug}-${count}`;
+  }
+
+  try {
+    const created = await prisma.project.create({
+      data: {
+        code,
+        name,
+        description: `${department} · ${designation}`,
+        status: 'Active',
+      },
+    });
+
+    appCache.invalidateTags(['projects', 'dashboard', 'students']);
+    revalidatePath('/students');
+    revalidatePath('/dashboard');
+    revalidatePath('/daily-food-list');
+
+    return {
+      success: true,
+      message: `Mentor "${name}" added successfully.`,
+      mentor: {
+        code: created.code,
+        name: created.name,
+        department,
+        designation,
+        status: 'Active',
+        memberCount: 0,
+      },
+    };
+  } catch (error) {
+    console.error('Error creating mentor:', error);
+    return { success: false, message: 'Server error while creating mentor.' };
+  }
+}
+
+export async function assignMentor(
+  studentIdInput: string,
+  mentorCodeInput: string
+): Promise<{ success: boolean; message: string }> {
+  const studentId = studentIdInput.trim().toUpperCase();
+  const mentorCode = mentorCodeInput.trim().toUpperCase();
+
+  try {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) return { success: false, message: `Member ${studentId} not found.` };
+
+    // Remove old mentor memberships
+    await prisma.projectMember.deleteMany({ where: { studentId } });
+
+    if (mentorCode && mentorCode !== 'UNASSIGNED') {
+      await prisma.projectMember.create({
+        data: {
+          studentId,
+          projectCode: mentorCode,
+          role: student.courseType === 'Intern' ? 'Intern' : 'Mentee',
+        },
+      });
+    }
+
+    appCache.invalidateTags(['students', 'projects', 'dashboard']);
+    revalidatePath('/students');
+    revalidatePath('/dashboard');
+    revalidatePath('/daily-food-list');
+
+    return { success: true, message: `Mentor updated for ${student.name}.` };
+  } catch (error) {
+    console.error('Error assigning mentor:', error);
+    return { success: false, message: 'Server error while assigning mentor.' };
   }
 }
 
@@ -663,17 +1025,24 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
         };
       });
 
-      const formattedStudents: StudentRecord[] = students.map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        courseType: s.courseType || 'Bachelor',
-        department: normalizeDepartmentName(s.department),
-        year: s.year,
-        email: s.email,
-        phone: s.phone,
-        status: s.status,
-        projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
-      }));
+      const formattedStudents: StudentRecord[] = students.map((s: any) => {
+        const isIntern = s.courseType === 'Intern' || s.id.startsWith('INT-');
+        return {
+          id: s.id,
+          name: s.name,
+          category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
+          courseType: s.courseType || (isIntern ? 'Intern' : 'Bachelor'),
+          department: isIntern ? s.department : normalizeDepartmentName(s.department),
+          startupName: isIntern ? s.department : undefined,
+          year: s.year || 0,
+          email: s.email,
+          phone: s.phone,
+          status: s.status,
+          mentorName: s.mentorName || 'Unassigned',
+          mentorCode: s.mentorCode || undefined,
+          projects: s.projects || (s.projectMemberships || []).map((pm: any) => pm.projectCode),
+        };
+      });
 
       const formattedProjects: ProjectRecord[] = projects.map((p: any) => ({
         code: p.code,
@@ -714,12 +1083,23 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
   }, ['dashboard', 'foodlist', 'foodtokens', 'students', 'projects']);
 }
 
-export async function getStudentsBundle(): Promise<{ students: StudentRecord[]; projects: ProjectRecord[] }> {
+export interface StudentsBundleData {
+  students: StudentRecord[];
+  projects: ProjectRecord[];
+  mentors: MentorRecord[];
+}
+
+export async function getStudentsBundle(): Promise<StudentsBundleData> {
   return appCache.get('students_bundle', 20, async () => {
     try {
       const [students, projects] = await Promise.all([
         prisma.student.findMany({
-          include: { projectMemberships: true },
+          include: {
+            projectMemberships: {
+              include: { project: true },
+            },
+          },
+          orderBy: { name: 'asc' },
         }),
         prisma.project.findMany({
           include: {
@@ -727,20 +1107,32 @@ export async function getStudentsBundle(): Promise<{ students: StudentRecord[]; 
               include: { student: true },
             },
           },
+          orderBy: { name: 'asc' },
         }),
       ]);
 
-      const formattedStudents: StudentRecord[] = students.map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        courseType: s.courseType || 'Bachelor',
-        department: normalizeDepartmentName(s.department),
-        year: s.year,
-        email: s.email,
-        phone: s.phone,
-        status: s.status,
-        projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
-      }));
+      const formattedStudents: StudentRecord[] = students.map((s: any) => {
+        const isIntern = s.courseType === 'Intern' || s.id.startsWith('INT-');
+        const primaryPm = s.projectMemberships?.[0];
+        const mentorName = primaryPm?.project?.name || 'Unassigned';
+        const mentorCode = primaryPm?.projectCode || undefined;
+
+        return {
+          id: s.id,
+          name: s.name,
+          category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
+          courseType: s.courseType || (isIntern ? 'Intern' : 'Bachelor'),
+          department: isIntern ? s.department : normalizeDepartmentName(s.department),
+          startupName: isIntern ? s.department : undefined,
+          year: s.year || 0,
+          email: s.email,
+          phone: s.phone,
+          status: s.status,
+          mentorName,
+          mentorCode,
+          projects: (s.projectMemberships || []).map((pm: any) => pm.projectCode),
+        };
+      });
 
       const formattedProjects: ProjectRecord[] = projects.map((p: any) => ({
         code: p.code,
@@ -757,13 +1149,24 @@ export async function getStudentsBundle(): Promise<{ students: StudentRecord[]; 
         })),
       }));
 
+      const mentors: MentorRecord[] = projects.map((p: any) => ({
+        code: p.code,
+        name: p.name,
+        department: p.description?.includes('·') ? p.description.split('·')[0].trim() : 'Incubation Facility',
+        designation: p.description?.includes('·') ? p.description.split('·')[1].trim() : 'Faculty Mentor / Lead',
+        phone: undefined,
+        status: p.status === 'Completed' ? 'Inactive' : 'Active',
+        memberCount: p.members?.length || 0,
+      }));
+
       return {
         students: formattedStudents,
         projects: formattedProjects,
+        mentors,
       };
     } catch (err) {
       console.error('getStudentsBundle error:', err);
-      return { students: [], projects: [] };
+      return { students: [], projects: [], mentors: [] };
     }
   }, ['students', 'projects']);
 }

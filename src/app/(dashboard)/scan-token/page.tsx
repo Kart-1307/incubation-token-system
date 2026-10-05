@@ -31,6 +31,10 @@ interface TokenDisplay {
   time: string;
   session?: string;
   status: string;
+  category?: 'Student' | 'Intern';
+  startupName?: string;
+  department?: string;
+  year?: number;
 }
 
 export default function ScanToken() {
@@ -224,6 +228,10 @@ export default function ScanToken() {
         time: res.existingToken.time,
         session: res.existingToken.session || currentMealSession,
         status: 'Issued',
+        category: res.student?.category,
+        startupName: res.student?.startupName,
+        department: res.student?.department,
+        year: res.student?.year,
       });
       setState('duplicate');
       playTerminalChime('warning');
@@ -280,6 +288,10 @@ export default function ScanToken() {
       time: t.time,
       session: t.session || currentMealSession,
       status: t.status,
+      category: t.category || student.category,
+      startupName: t.startupName || student.startupName,
+      department: student.department,
+      year: student.year,
     });
 
     setState('token-generated');
@@ -522,7 +534,7 @@ export default function ScanToken() {
               type="text"
               value={scannedId}
               onChange={(e) => setScannedId(e.target.value)}
-              placeholder="SCAN BARCODE OR TYPE ROLL NO (E.G. 23CS101)..."
+              placeholder="SCAN BARCODE OR TYPE ROLL NO / 4-DIGIT CODE (E.G. 23CS101, INT-3210, 3210)..."
               className="flex-1 px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase terminal-input"
             />
             <button
@@ -537,8 +549,8 @@ export default function ScanToken() {
           {/* Registered Student Quick-Tap Buttons */}
           <div className="pt-2 border-t border-slate-800">
             <div className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider flex items-center justify-between">
-              <span>Quick Test ID Card Tap (Registered Students):</span>
-              <span className="text-[10px] text-indigo-400 font-mono">{dbStudents.length} Students</span>
+              <span>Quick Test ID Card Tap (Registered Members):</span>
+              <span className="text-[10px] text-indigo-400 font-mono">{dbStudents.length} Members</span>
             </div>
             {dbStudents.length === 0 ? (
               <div className="text-xs text-slate-500 italic py-1">No registered students found in database</div>
@@ -691,27 +703,49 @@ export default function ScanToken() {
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 mx-auto flex items-center justify-center text-2xl font-bold mb-2">
               ✓
             </div>
-            <h3 className="text-lg font-bold text-emerald-800">Student Eligible for Meal</h3>
+            <h3 className="text-lg font-bold text-emerald-800">
+              {student?.category === 'Intern' ? 'Startup Intern Eligible for Meal' : 'Student Eligible for Meal'}
+            </h3>
             <p className="text-xs text-emerald-600 font-medium mt-0.5">Approved on today's food eligibility list</p>
           </div>
           <div className="p-6 space-y-4">
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Student Name:</span>
-                <span className="font-bold text-slate-900">{student?.name || 'Eligible Student'}</span>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Member Name:</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-900">{student?.name || 'Eligible Member'}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      student?.category === 'Intern'
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        : 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                    }`}
+                  >
+                    {student?.category === 'Intern' ? '💼 INTERN' : '🎓 STUDENT'}
+                  </span>
+                </div>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Student ID:</span>
+                <span className="text-slate-500">ID Number / Code:</span>
                 <span className="font-bold font-mono text-indigo-700">{student?.id || scannedId}</span>
               </div>
+              {student?.category === 'Intern' ? (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Startup:</span>
+                  <span className="font-semibold text-slate-800">
+                    💼 {student.startupName || student.department}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Department & Year:</span>
+                  <span className="font-medium text-slate-800">
+                    {student?.department || '—'} {student?.year ? `· Year ${student.year}` : ''}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
-                <span className="text-slate-500">Department & Year:</span>
-                <span className="font-medium text-slate-800">
-                  {student?.department || '—'} {student?.year ? `· Year ${student.year}` : ''}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Incubation Project:</span>
+                <span className="text-slate-500">Affiliation / Project:</span>
                 <span className="font-medium text-slate-800">{projectName || 'Incubation Member'}</span>
               </div>
               <div className="flex justify-between pt-1 border-t border-slate-200">
@@ -780,15 +814,30 @@ export default function ScanToken() {
 
               <div className="space-y-1.5 border-t border-b border-dashed border-slate-300 py-2.5 my-2 text-[11px]">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">STUDENT:</span>
-                  <span className="font-bold">{generatedToken?.studentName || student?.name || 'Student'}</span>
+                  <span className="text-slate-500">
+                    {generatedToken?.category === 'Intern' || student?.category === 'Intern' ? 'INTERN:' : 'STUDENT:'}
+                  </span>
+                  <span className="font-bold">{generatedToken?.studentName || student?.name || 'Member'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">ID NO:</span>
                   <span className="font-bold font-mono">{generatedToken?.studentId || student?.id || scannedId}</span>
                 </div>
+                {generatedToken?.category === 'Intern' || student?.category === 'Intern' ? (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">STARTUP:</span>
+                    <span className="font-bold text-right truncate">
+                      {generatedToken?.startupName || student?.startupName || student?.department || 'Startup Intern'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">DEPT:</span>
+                    <span>{student?.department || '—'}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
-                  <span className="text-slate-500">PROJECT:</span>
+                  <span className="text-slate-500">PROJECT / MENTOR:</span>
                   <span>{generatedToken?.project || projectName || 'Incubation Member'}</span>
                 </div>
                 <div className="flex justify-between">
