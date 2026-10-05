@@ -10,6 +10,7 @@ export interface StudentInfo {
   name: string;
   department?: string;
   year?: number | string;
+  category?: string;
 }
 
 interface FoodRequestLetterModalProps {
@@ -381,7 +382,14 @@ export default function FoodRequestLetterModal({
                   <td className="border border-slate-400 px-2 py-1.5 text-center text-slate-600 font-medium">{idx + 1}</td>
                   <td className="border border-slate-400 px-3 py-1.5 font-medium text-slate-800">{st.name}</td>
                   <td className="border border-slate-400 px-3 py-1.5 text-center font-bold text-slate-900 font-sans tracking-wider text-[11px]">
-                    {st.studentId}
+                    {st.category === 'Intern' || st.studentId.startsWith('INT-') ? (
+                      <div>
+                        <div>{st.studentId}</div>
+                        <div className="text-[10px] text-slate-500 font-normal font-sans tracking-normal mt-0.5">(Startup Intern)</div>
+                      </div>
+                    ) : (
+                      st.studentId
+                    )}
                   </td>
                   <td className="border border-slate-400 px-2 py-1.5 text-center font-bold text-slate-700 text-xs">
                     {formatDepartmentShort(st.department)}
@@ -866,7 +874,14 @@ export default function FoodRequestLetterModal({
                                   className="w-full bg-amber-50/80 px-1.5 py-0.5 border-b border-dashed border-amber-400 outline-none rounded text-xs text-center font-bold"
                                 />
                               ) : (
-                                <span>{st.studentId}</span>
+                                st.category === 'Intern' || st.studentId.startsWith('INT-') ? (
+                                  <div>
+                                    <div>{st.studentId}</div>
+                                    <div className="text-[10px] text-slate-500 font-normal font-sans tracking-normal mt-0.5">(Startup Intern)</div>
+                                  </div>
+                                ) : (
+                                  <span>{st.studentId}</span>
+                                )
                               )}
                             </td>
                             <td className="border border-slate-400 px-2 py-1 text-center font-bold text-slate-700 text-xs">

@@ -92,7 +92,11 @@ export default function TokenSlipModal({ token, isOpen, onClose }: TokenSlipModa
               </div>
               <div className="flex justify-between gap-1">
                 <span className="text-slate-500">ID NO:</span>
-                <span className="font-bold font-mono text-right">{token.studentId}</span>
+                <span className="font-bold font-mono text-right">
+                  {token.category === 'Intern' || token.studentId.startsWith('INT-')
+                    ? `${token.studentId} (Startup Intern)`
+                    : token.studentId}
+                </span>
               </div>
               {token.category === 'Intern' || token.studentId.startsWith('INT-') ? (
                 <div className="flex justify-between gap-1">
@@ -114,14 +118,6 @@ export default function TokenSlipModal({ token, isOpen, onClose }: TokenSlipModa
                 </span>
               </div>
             </div>
-
-            {/* QR Code */}
-            {qrCodeUrl && (
-              <div className="my-2 flex flex-col items-center justify-center">
-                <img src={qrCodeUrl} alt="QR Code" className="w-24 h-24 object-contain" />
-                <div className="text-[8px] text-slate-400 font-mono mt-0.5">SCAN AT MESS COUNTER</div>
-              </div>
-            )}
 
             {/* Disclaimer */}
             <div className="text-center text-[8px] text-slate-500 pt-1 border-t border-dashed border-slate-200">

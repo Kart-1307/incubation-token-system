@@ -7,6 +7,7 @@ export interface StudentInfo {
   name: string;
   department?: string;
   year?: number | string;
+  category?: string;
 }
 
 export interface EditableLetterContent {
@@ -184,7 +185,9 @@ export function generateFoodRequestLetterPdf(
   const tableData = finalStudents.map((st, index) => [
     String(index + 1),
     st.name,
-    st.studentId,
+    (st.category === 'Intern' || st.studentId.startsWith('INT-'))
+      ? `${st.studentId}\n(Startup Intern)`
+      : st.studentId,
     formatDepartmentShort(st.department),
     formatYearRoman(st.year),
   ]);

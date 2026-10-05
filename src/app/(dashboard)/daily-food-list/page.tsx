@@ -738,22 +738,56 @@ function DailyFoodListContent() {
     const res = await addStudentToDailyList(selectedDate, foundStudent.id, defaultCode);
     if (res.success) {
       showToast(res.message);
+      // Instant optimistic UI addition (0ms)
+      const addedEntry: FoodListEntry = {
+        studentId: foundStudent.id,
+        studentName: foundStudent.name,
+        department: foundStudent.department,
+        year: typeof foundStudent.year === 'number' ? foundStudent.year : parseInt(foundStudent.year || '0', 10) || 0,
+        mentorId: defaultCode,
+        mentorName: foundStudent.mentorName || 'Unassigned',
+        category: isIntern ? 'Intern' : 'Student',
+        startupName: isIntern ? foundStudent.department : undefined,
+        projectCode: isIntern ? 'GEN-INTERN' : (foundStudent.mentorCode || 'INC-GENERAL'),
+        projectName: isIntern ? (foundStudent.department ? `Startup: ${foundStudent.department}` : 'Startup Intern') : (foundStudent.mentorName ? `Mentor: ${foundStudent.mentorName}` : 'Incubation Member'),
+        addedBy: 'Staff Portal',
+        status: 'Approved',
+      };
+      setCurrentList(prev => {
+        if (!prev) return prev;
+        const updated: FoodListDetails = {
+          ...prev,
+          entries: [addedEntry, ...(prev.entries || []).filter(e => e.studentId !== foundStudent.id)],
+        };
+        globalDateCache.set(selectedDate, updated);
+        return updated;
+      });
+
       setShowAddStudent(false);
       setFoundStudent(null);
       setSearchId('');
-      await loadData(selectedDate);
+      loadData(selectedDate);
     } else {
       showToast(res.message);
     }
   };
 
   const handleRemoveEntry = async (studentId: string) => {
+    // Instant optimistic UI removal (0ms)
+    setCurrentList(prev => {
+      if (!prev) return prev;
+      const updated: FoodListDetails = {
+        ...prev,
+        entries: (prev.entries || []).filter(e => e.studentId !== studentId),
+      };
+      globalDateCache.set(selectedDate, updated);
+      return updated;
+    });
+
     const res = await removeStudentFromDailyList(selectedDate, studentId);
-    if (res.success) {
-      showToast(res.message);
+    showToast(res.message);
+    if (!res.success) {
       await loadData(selectedDate);
-    } else {
-      showToast(res.message);
     }
   };
 
@@ -768,12 +802,42 @@ function DailyFoodListContent() {
 
   const handleAddBulkStudents = async () => {
     if (bulkSelected.length === 0 || !bulkMentor) return;
+
+    // Instant optimistic UI addition for bulk selection (0ms)
+    const addedEntries: FoodListEntry[] = bulkSelected.map(stId => {
+      const found = studentRegistry.find((s: any) => s.id === stId);
+      const isIntern = found?.category === 'Intern' || found?.courseType === 'Intern' || stId.startsWith('INT-');
+      return {
+        studentId: stId,
+        studentName: found?.name || stId,
+        department: found?.department || '',
+        year: typeof found?.year === 'number' ? found.year : parseInt(found?.year || '0', 10) || 0,
+        mentorId: bulkMentor,
+        mentorName: mentorRegistry.find(m => m.code === bulkMentor)?.name || 'Assigned Mentor',
+        category: isIntern ? 'Intern' : 'Student',
+        startupName: isIntern ? found?.department : undefined,
+        projectCode: bulkMentor,
+        projectName: `Mentor: ${mentorRegistry.find(m => m.code === bulkMentor)?.name || 'Assigned Mentor'}`,
+        addedBy: 'Staff Portal (Bulk Mentor)',
+        status: 'Approved',
+      };
+    });
+    setCurrentList(prev => {
+      if (!prev) return prev;
+      const updated: FoodListDetails = {
+        ...prev,
+        entries: [...addedEntries, ...(prev.entries || []).filter(e => !bulkSelected.includes(e.studentId))],
+      };
+      globalDateCache.set(selectedDate, updated);
+      return updated;
+    });
+
     const res = await addBulkByMentorToDailyList(selectedDate, bulkSelected, bulkMentor);
     showToast(res.message);
     setBulkSelected([]);
     setBulkMentor('');
     setShowBulkAdd(false);
-    await loadData(selectedDate);
+    loadData(selectedDate);
   };
 
   // Pagination & Search states for 100+ student handling

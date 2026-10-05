@@ -6,10 +6,8 @@ import { revalidatePath } from 'next/cache';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
 import { getTodayISTDateString, formatISTTime, getTokenEffectiveSession, getMealSession, getPreviousISTDateString } from '@/utils/timeUtils';
 
-function safeRevalidate(path: string) {
-  try {
-    revalidatePath(path);
-  } catch {}
+function safeRevalidate(_path: string) {
+  // Pruned blocking multi-page revalidation in server actions; state and appCache.invalidateTags provide instant updates
 }
 
 export interface StudentRecord {
@@ -398,11 +396,7 @@ export async function createIntern(data: {
       finalId = `${baseId}-${counter}`;
     }
 
-    let email = `intern.${cleanPhone}@incubation.local`;
-    const emailCollision = await prisma.student.findUnique({ where: { email } });
-    if (emailCollision) {
-      email = `intern.${finalId.toLowerCase()}.${Date.now().toString().slice(-4)}@incubation.local`;
-    }
+    const email = `intern.${finalId.toLowerCase()}@incubation.local`;
 
     const rawMentorId = data.mentorId || data.mentorCode;
     const mentorId = rawMentorId && rawMentorId !== 'UNASSIGNED' ? rawMentorId.trim() : null;

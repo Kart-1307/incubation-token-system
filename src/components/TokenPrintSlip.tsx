@@ -87,16 +87,16 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
     };
   }, [token, settings.includeQrCode, settings.paperWidth]);
 
-  // Handle auto-print once mounted and QR code is ready
+  // Handle auto-print once mounted
   useEffect(() => {
     const shouldPrint = autoPrint || (settings.autoPrint && Boolean(token));
-    if (token && shouldPrint && mounted && qrReady) {
+    if (token && shouldPrint && mounted) {
       const timer = setTimeout(() => {
         window.print();
       }, 250);
       return () => clearTimeout(timer);
     }
-  }, [token, autoPrint, settings.autoPrint, mounted, qrReady]);
+  }, [token, autoPrint, settings.autoPrint, mounted]);
 
   if (!token) return null;
 
@@ -150,7 +150,11 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
         </div>
         <div className="flex justify-between items-baseline gap-1">
           <span className="font-semibold text-slate-800">ID NO:</span>
-          <span className="font-bold text-right">{token.studentId}</span>
+          <span className="font-bold text-right">
+            {token.category === 'Intern' || token.studentId.startsWith('INT-')
+              ? `${token.studentId} (Startup Intern)`
+              : token.studentId}
+          </span>
         </div>
         {token.category === 'Intern' || token.studentId.startsWith('INT-') ? (
           <div className="flex justify-between items-baseline gap-1">
@@ -172,21 +176,6 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
           </span>
         </div>
       </div>
-
-      {/* Scannable Verification QR Code */}
-      {settings.includeQrCode && qrCodeUrl && (
-        <div className="my-2 flex flex-col items-center justify-center">
-          <img
-            src={qrCodeUrl}
-            alt={`QR-${token.tokenNumber}`}
-            className="w-28 h-28 object-contain"
-            style={{ imageRendering: 'pixelated' }}
-          />
-          <div className="text-[8px] text-slate-600 font-mono tracking-tighter mt-0.5">
-            SCAN AT MESS COUNTER
-          </div>
-        </div>
-      )}
 
       {/* Security & Validity Disclaimer */}
       <div className="text-[8px] text-center text-slate-700 leading-tight pt-1 border-t border-dashed border-black">

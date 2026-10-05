@@ -143,10 +143,8 @@ export async function getLetterMealSessionCounts(dateInput?: string): Promise<Le
   }
 }
 
-function safeRevalidate(path: string) {
-  try {
-    revalidatePath(path);
-  } catch {}
+function safeRevalidate(_path: string) {
+  // Pruned blocking multi-page revalidation in server actions; client state and appCache handle instant UI updates
 }
 
 export async function scanStudentIntoDailyFoodList(

@@ -92,6 +92,7 @@ export default function Students() {
     mentorCode: '',
   });
   const [formError, setFormError] = useState('');
+  const [isSavingMember, setIsSavingMember] = useState(false);
 
   // Inline Add Mentor states for Add Member modal
   const [isAddingNewMentorInline, setIsAddingNewMentorInline] = useState(false);
@@ -253,103 +254,154 @@ export default function Students() {
   // Save Student or Intern
   const handleSaveMember = async () => {
     setFormError('');
+    setIsSavingMember(true);
 
-    let resolvedMentorCode: string | undefined = undefined;
-    if (isAddingNewMentorInline) {
-      if (!inlineMentorName.trim()) {
-        setFormError('Please enter the Mentor Name or click "Cancel" to select an existing mentor.');
-        return;
-      }
-      try {
-        const mRes = await createMentor({
-          name: inlineMentorName.trim(),
-          department: inlineMentorDept.trim() || 'Incubation Center',
-          designation: 'Faculty Mentor',
-        });
-        if (!mRes.success || !mRes.mentor) {
-          setFormError(mRes.message || 'Error creating new mentor.');
+    try {
+      let resolvedMentorCode: string | undefined = undefined;
+      if (isAddingNewMentorInline) {
+        if (!inlineMentorName.trim()) {
+          setFormError('Please enter the Mentor Name or click "Cancel" to select an existing mentor.');
           return;
         }
-        resolvedMentorCode = mRes.mentor.id || mRes.mentor.code;
-      } catch (err: any) {
-        setFormError(err?.message || 'Failed to create mentor.');
-        return;
-      }
-    } else {
-      resolvedMentorCode = (memberType === 'intern' ? undefined : form.mentorCode) || undefined;
-    }
-
-    if (memberType === 'intern') {
-      if (!internForm.name.trim()) {
-        setFormError('Intern Full Name is required.');
-        return;
-      }
-      if (internCleanDigits.length < 4) {
-        setFormError('Please enter a valid phone number (at least 4 digits needed for ID).');
-        return;
-      }
-      if (!internForm.startupName.trim()) {
-        setFormError('Startup / Company Name is required.');
-        return;
-      }
-
-      const res = await createIntern({
-        name: internForm.name,
-        phone: internForm.phone,
-        startupName: internForm.startupName,
-      });
-
-      if (res.success) {
-        showToast(res.message);
-        setInternForm({ name: '', phone: '', startupName: '', mentorCode: '' });
-        setIsAddingNewMentorInline(false);
-        setInlineMentorName('');
-        setInlineMentorDept('');
-        setShowAdd(false);
-        await loadData();
+        try {
+          const mRes = await createMentor({
+            name: inlineMentorName.trim(),
+            department: inlineMentorDept.trim() || 'Incubation Center',
+            designation: 'Faculty Mentor',
+          });
+          if (!mRes.success || !mRes.mentor) {
+            setFormError(mRes.message || 'Error creating new mentor.');
+            return;
+          }
+          resolvedMentorCode = mRes.mentor.id || mRes.mentor.code;
+        } catch (err: any) {
+          setFormError(err?.message || 'Failed to create mentor.');
+          return;
+        }
       } else {
-        setFormError(res.message);
-      }
-    } else {
-      // College Student
-      if (!form.id || !form.name || !form.email) {
-        setFormError('Student Roll ID, Name, and Email are required.');
-        return;
+        resolvedMentorCode = (memberType === 'intern' ? undefined : form.mentorCode) || undefined;
       }
 
-      const res = await createStudent({
-        id: form.id,
-        name: form.name,
-        courseType: form.courseType,
-        department: form.department,
-        year: Number(form.year),
-        email: form.email,
-        phone: form.phone,
-        status: form.status,
-        mentorId: resolvedMentorCode,
-      });
+      if (memberType === 'intern') {
+        if (!internForm.name.trim()) {
+          setFormError('Intern Full Name is required.');
+          return;
+        }
+        if (internCleanDigits.length < 4) {
+          setFormError('Please enter a valid phone number (at least 4 digits needed for ID).');
+          return;
+        }
+        if (!internForm.startupName.trim()) {
+          setFormError('Startup / Company Name is required.');
+          return;
+        }
 
-      if (res.success) {
-        showToast(res.message);
-        setForm({
-          id: '',
-          name: '',
-          courseType: 'Bachelor',
-          department: 'Computer Science and Engineering',
-          year: '1',
-          email: '',
-          phone: '',
-          status: 'Active',
-          mentorCode: '',
+        const res = await createIntern({
+          name: internForm.name,
+          phone: internForm.phone,
+          startupName: internForm.startupName,
         });
-        setIsAddingNewMentorInline(false);
-        setInlineMentorName('');
-        setInlineMentorDept('');
-        setShowAdd(false);
-        await loadData();
+
+        if (res.success && res.student) {
+          showToast(res.message);
+          const newStudent = res.student;
+
+          // Instant optimistic UI update (0ms)
+          setStudentList(prev => [newStudent, ...prev.filter(s => s.id !== newStudent.id)]);
+
+          // Synchronize in-memory & sessionStorage cache immediately
+          if (typeof window !== 'undefined') {
+            try {
+              const currentCached = memoryStudentsCache?.students || [];
+              const updatedCache = [newStudent, ...currentCached.filter(s => s.id !== newStudent.id)];
+              const payload = {
+                students: updatedCache,
+                projects: projectList,
+                mentors: mentorList,
+                timestamp: Date.now(),
+              };
+              memoryStudentsCache = payload;
+              sessionStorage.setItem('incubation_students_cache', JSON.stringify(payload));
+            } catch {}
+          }
+
+          setInternForm({ name: '', phone: '', startupName: '', mentorCode: '' });
+          setIsAddingNewMentorInline(false);
+          setInlineMentorName('');
+          setInlineMentorDept('');
+          setShowAdd(false);
+
+          // Background sync without blocking the UI
+          loadData(true);
+        } else {
+          setFormError(res.message);
+        }
       } else {
-        setFormError(res.message);
+        // College Student
+        if (!form.id || !form.name || !form.email) {
+          setFormError('Student Roll ID, Name, and Email are required.');
+          return;
+        }
+
+        const res = await createStudent({
+          id: form.id,
+          name: form.name,
+          courseType: form.courseType,
+          department: form.department,
+          year: Number(form.year),
+          email: form.email,
+          phone: form.phone,
+          status: form.status,
+          mentorId: resolvedMentorCode,
+        });
+
+        if (res.success && res.student) {
+          showToast(res.message);
+          const newStudent = res.student;
+
+          // Instant optimistic UI update (0ms)
+          setStudentList(prev => [newStudent, ...prev.filter(s => s.id !== newStudent.id)]);
+
+          // Synchronize in-memory & sessionStorage cache immediately
+          if (typeof window !== 'undefined') {
+            try {
+              const currentCached = memoryStudentsCache?.students || [];
+              const updatedCache = [newStudent, ...currentCached.filter(s => s.id !== newStudent.id)];
+              const payload = {
+                students: updatedCache,
+                projects: projectList,
+                mentors: mentorList,
+                timestamp: Date.now(),
+              };
+              memoryStudentsCache = payload;
+              sessionStorage.setItem('incubation_students_cache', JSON.stringify(payload));
+            } catch {}
+          }
+
+          setForm({
+            id: '',
+            name: '',
+            courseType: 'Bachelor',
+            department: 'Computer Science and Engineering',
+            year: '1',
+            email: '',
+            phone: '',
+            status: 'Active',
+            mentorCode: '',
+          });
+          setIsAddingNewMentorInline(false);
+          setInlineMentorName('');
+          setInlineMentorDept('');
+          setShowAdd(false);
+
+          // Background sync without blocking the UI
+          loadData(true);
+        } else {
+          setFormError(res.message);
+        }
       }
+    } finally {
+      setIsSavingMember(false);
     }
   };
 
@@ -465,10 +517,10 @@ export default function Students() {
     try {
       const res = await deleteStudent(targetId);
       showToast(res.message);
-      await loadData();
+      loadData(true);
     } catch (e) {
       showToast(`Error deleting ${targetName}.`);
-      await loadData();
+      loadData(true);
     }
   };
 
@@ -1342,11 +1394,19 @@ export default function Students() {
               <button
                 type="button"
                 onClick={handleSaveMember}
-                className={`px-4 py-2 text-sm text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer ${
+                disabled={isSavingMember}
+                className={`px-4 py-2 text-sm text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1.5 ${
                   memberType === 'intern' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-700 hover:bg-indigo-800'
                 }`}
               >
-                {memberType === 'intern' ? 'Save Startup Intern' : 'Save Student'}
+                {isSavingMember ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  memberType === 'intern' ? 'Save Startup Intern' : 'Save Student'
+                )}
               </button>
             </div>
           </div>
