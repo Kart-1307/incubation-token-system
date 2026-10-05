@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getMealSession, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 import { getPrinterSettings, generateQrCodeDataUrl, type PrinterSettings } from '@/utils/thermalPrinterUtils';

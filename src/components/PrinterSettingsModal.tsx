@@ -180,7 +180,7 @@ export default function PrinterSettingsModal({
               To bypass the browser print dialog completely on Windows, set your thermal printer as default in Windows and launch Chrome in kiosk mode:
             </p>
             <div className="bg-amber-100/70 text-slate-800 font-mono text-[11px] p-2 rounded border border-amber-300/60 select-all overflow-x-auto">
-              chrome.exe --kiosk-printing http://localhost:3000/scan-token
+              chrome.exe --kiosk-printing {typeof window !== 'undefined' ? `${window.location.origin}/scan-token` : 'http://localhost:3000/scan-token'}
             </div>
           </div>
 
