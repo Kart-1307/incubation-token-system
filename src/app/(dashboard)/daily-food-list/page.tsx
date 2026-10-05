@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'rea
 import { useSearchParams, useRouter } from 'next/navigation';
 import Badge from '@/components/Badge';
 import FoodRequestLetterModal from '@/components/FoodRequestLetterModal';
-import TokenPrintSlip from '@/components/TokenPrintSlip';
+import TokenPrintSlip, { type TokenPrintData } from '@/components/TokenPrintSlip';
+import TokenSlipModal from '@/components/TokenSlipModal';
+import PrinterSettingsModal from '@/components/PrinterSettingsModal';
 import {
   getDailyFoodList,
   addStudentToDailyList,
@@ -184,7 +186,10 @@ function DailyFoodListContent() {
   const [tokenSearch, setTokenSearch] = useState('');
   const [tokenDateFilter, setTokenDateFilter] = useState<string>(initialDate);
   const [tokenSessionFilter, setTokenSessionFilter] = useState('ALL');
-  const [selectedPrintToken, setSelectedPrintToken] = useState<any | null>(null);
+  const [selectedPrintToken, setSelectedPrintToken] = useState<TokenPrintData | null>(null);
+  const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
+  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
+  const [testPrintToken, setTestPrintToken] = useState<TokenPrintData | null>(null);
 
   // Datewise logs state
   const [datewiseLogs, setDatewiseLogs] = useState<DatewiseLogSummary[]>([]);
@@ -807,7 +812,27 @@ function DailyFoodListContent() {
   return (
     <div className="space-y-6">
       {/* Thermal Receipt Print Slip Portal */}
-      <TokenPrintSlip token={selectedPrintToken} />
+      <TokenPrintSlip token={testPrintToken || selectedPrintToken} />
+
+      {/* Interactive Token Slip Modal */}
+      <TokenSlipModal
+        isOpen={isSlipModalOpen}
+        token={selectedPrintToken}
+        onClose={() => {
+          setIsSlipModalOpen(false);
+          setSelectedPrintToken(null);
+        }}
+      />
+
+      {/* Printer Configuration Modal */}
+      <PrinterSettingsModal
+        isOpen={isPrinterModalOpen}
+        onClose={() => setIsPrinterModalOpen(false)}
+        onTriggerTestPrint={(testToken) => {
+          setTestPrintToken(testToken);
+          setTimeout(() => window.print(), 250);
+        }}
+      />
 
       {/* Page Title & Top Navigation Tabs */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
@@ -819,8 +844,20 @@ function DailyFoodListContent() {
             </p>
           </div>
 
-          {/* Segmented Subtab Switcher */}
-          <div className="inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 self-start sm:self-auto">
+          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            {/* Quick Printer Setup & Diagnostic Button */}
+            <button
+              type="button"
+              onClick={() => setIsPrinterModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
+              title="Thermal Printer Settings & Diagnostic Test Slip"
+            >
+              <span>🖨️</span>
+              <span>Printer Settings</span>
+            </button>
+
+            {/* Segmented Subtab Switcher */}
+            <div className="inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80">
             <button
               onClick={() => switchTab('list')}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
@@ -864,6 +901,7 @@ function DailyFoodListContent() {
               <span>📅</span>
               <span>Datewise Logs</span>
             </button>
+          </div>
           </div>
         </div>
       </div>
@@ -1367,7 +1405,18 @@ function DailyFoodListContent() {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
-                              onClick={() => setSelectedPrintToken(t)}
+                              onClick={() => {
+                                setSelectedPrintToken({
+                                  tokenNumber: t.tokenNumber,
+                                  studentId: t.studentId,
+                                  studentName: t.studentName,
+                                  project: t.project,
+                                  date: t.date,
+                                  time: t.time || t.issuedAt,
+                                  session: t.session,
+                                });
+                                setIsSlipModalOpen(true);
+                              }}
                               className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
                             >
                               View Slip

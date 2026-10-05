@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { getMealSession, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
+import { getPrinterSettings, generateQrCodeDataUrl, type PrinterSettings } from '@/utils/thermalPrinterUtils';
 
 export interface TokenPrintData {
   tokenNumber: string;
@@ -14,6 +15,7 @@ export interface TokenPrintData {
   date: string;
   time: string;
   session?: string;
+  isTestPrint?: boolean;
 }
 
 interface TokenPrintSlipProps {
@@ -24,61 +26,170 @@ interface TokenPrintSlipProps {
 
 export default function TokenPrintSlip({ token, onClose, autoPrint = false }: TokenPrintSlipProps) {
   const [mounted, setMounted] = useState(false);
+  const [settings, setSettings] = useState<PrinterSettings>(() => getPrinterSettings());
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [qrReady, setQrReady] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    setSettings(getPrinterSettings());
+
+    const handleSettingsChange = (e: Event) => {
+      const customEvent = e as CustomEvent<PrinterSettings>;
+      if (customEvent.detail) {
+        setSettings(customEvent.detail);
+      }
+    };
+
+    window.addEventListener('thermal-printer-settings-changed', handleSettingsChange);
+    return () => {
+      window.removeEventListener('thermal-printer-settings-changed', handleSettingsChange);
+    };
   }, []);
 
+  // Generate QR Code whenever token or settings change
   useEffect(() => {
-    if (token && autoPrint && mounted) {
+    if (!token) {
+      setQrCodeUrl('');
+      setQrReady(false);
+      return;
+    }
+
+    if (!settings.includeQrCode) {
+      setQrCodeUrl('');
+      setQrReady(true);
+      return;
+    }
+
+    let isSubscribed = true;
+    setQrReady(false);
+
+    // Encode token validation payload into QR code
+    const payload = JSON.stringify({
+      tok: token.tokenNumber,
+      sid: token.studentId,
+      ses: token.session || getMealSession(),
+      dt: token.date,
+    });
+
+    const qrSize = settings.paperWidth === '58mm' ? 110 : 135;
+    generateQrCodeDataUrl(payload, qrSize).then((url) => {
+      if (isSubscribed) {
+        setQrCodeUrl(url);
+        setQrReady(true);
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [token, settings.includeQrCode, settings.paperWidth]);
+
+  // Handle auto-print once mounted and QR code is ready
+  useEffect(() => {
+    const shouldPrint = autoPrint || (settings.autoPrint && Boolean(token));
+    if (token && shouldPrint && mounted && qrReady) {
       const timer = setTimeout(() => {
         window.print();
-      }, 300);
+      }, 250);
       return () => clearTimeout(timer);
     }
-  }, [token, autoPrint, mounted]);
+  }, [token, autoPrint, settings.autoPrint, mounted, qrReady]);
 
   if (!token) return null;
 
   const sessionName = token.session || getMealSession();
+  const is58mm = settings.paperWidth === '58mm';
 
   const printContent = (
-    <div id="token-slip-printable" className="hidden print:block text-black bg-white font-mono p-2">
-      <div className="text-center font-bold text-xs uppercase tracking-wide border-b border-black pb-1 mb-2">
-        SRI SAIRAM TECHNO INCUBATOR FOUNDATION
-        <div className="text-[10px] font-normal tracking-normal text-slate-700">FOOD TOKEN SYSTEM</div>
+    <div
+      id="token-slip-printable"
+      className={`hidden print:block text-black bg-white font-mono p-1 ${
+        is58mm ? 'slip-58mm max-w-[58mm] text-[10px]' : 'slip-80mm max-w-[80mm] text-[11px]'
+      }`}
+    >
+      {/* Test Print Header Banner */}
+      {token.isTestPrint && (
+        <div className="border-2 border-black border-dashed p-1 mb-2 text-center text-[10px] font-bold">
+          <div>*** DIAGNOSTIC TEST SLIP ***</div>
+          <div className="text-[9px] font-normal">HARDWARE CALIBRATION & ALIGNMENT</div>
+          <div className="mt-1 tracking-widest text-[8px]">████████████████████████</div>
+        </div>
+      )}
+
+      {/* Institution & Counter Header */}
+      <div className="text-center font-bold uppercase tracking-wide border-b-2 border-black pb-1.5 mb-2">
+        <div className={is58mm ? 'text-[11px] leading-tight' : 'text-xs leading-tight'}>
+          {settings.headerTitle}
+        </div>
+        <div className="text-[9px] font-semibold tracking-normal text-slate-800 mt-0.5">
+          FOOD TOKEN SYSTEM · MESS COUNTER
+        </div>
       </div>
 
-      <div className="text-center my-2 border border-black p-2 rounded">
-        <div className="text-[10px] uppercase tracking-wider text-slate-600">TOKEN NUMBER</div>
-        <div className="text-xl font-black font-mono tracking-wider">{token.tokenNumber}</div>
-        <div className="text-xs font-bold mt-1 bg-black text-white px-2 py-0.5 rounded inline-block uppercase">
+      {/* Main Token Serial Number Box */}
+      <div className="text-center my-2 border-2 border-black p-2 rounded">
+        <div className="text-[9px] uppercase tracking-wider text-slate-700 font-bold">TOKEN NUMBER</div>
+        <div className={`font-black font-mono tracking-widest my-0.5 ${is58mm ? 'text-lg' : 'text-xl'}`}>
+          {token.tokenNumber}
+        </div>
+        <div className="text-[10px] font-extrabold bg-black text-white px-2.5 py-0.5 rounded inline-block uppercase tracking-wider">
           {sessionName}
         </div>
       </div>
 
-      <div className="text-xs space-y-1 my-3 border-b border-black pb-2 font-sans">
-        <div className="flex justify-between">
-          <span className="font-semibold text-slate-600">STUDENT:</span>
-          <span className="font-bold">{token.studentName}</span>
+      {/* Student & Project Details Table */}
+      <div className="space-y-1 my-2 border-b-2 border-black pb-2 font-mono leading-tight">
+        <div className="flex justify-between items-baseline gap-1">
+          <span className="font-semibold text-slate-800">STUDENT:</span>
+          <span className="font-bold text-right truncate">{token.studentName}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="font-semibold text-slate-600">ID NO:</span>
-          <span className="font-bold font-mono">{token.studentId}</span>
+        <div className="flex justify-between items-baseline gap-1">
+          <span className="font-semibold text-slate-800">ID NO:</span>
+          <span className="font-bold text-right">{token.studentId}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="font-semibold text-slate-600">PROJECT:</span>
-          <span className="font-bold">{token.project}</span>
+        {token.department && (
+          <div className="flex justify-between items-baseline gap-1">
+            <span className="font-semibold text-slate-800">DEPT:</span>
+            <span className="font-bold text-right">{token.department}</span>
+          </div>
+        )}
+        <div className="flex justify-between items-baseline gap-1">
+          <span className="font-semibold text-slate-800">PROJECT:</span>
+          <span className="font-bold text-right truncate">{token.project}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="font-semibold text-slate-600">DATE & TIME:</span>
-          <span>{formatISTDateDMY(token.date)} · {formatISTTime(token.time)}</span>
+        <div className="flex justify-between items-baseline gap-1">
+          <span className="font-semibold text-slate-800">TIME:</span>
+          <span className="text-right">
+            {formatISTDateDMY(token.date)} · {formatISTTime(token.time)}
+          </span>
         </div>
       </div>
 
-      <div className="text-[9px] text-center text-slate-600 leading-tight">
-        <div>Valid for 1 meal ({sessionName}) only</div>
-        <div>Non-transferable · Mess Counter Token</div>
+      {/* Scannable Verification QR Code */}
+      {settings.includeQrCode && qrCodeUrl && (
+        <div className="my-2 flex flex-col items-center justify-center">
+          <img
+            src={qrCodeUrl}
+            alt={`QR-${token.tokenNumber}`}
+            className="w-28 h-28 object-contain"
+            style={{ imageRendering: 'pixelated' }}
+          />
+          <div className="text-[8px] text-slate-600 font-mono tracking-tighter mt-0.5">
+            SCAN AT MESS COUNTER
+          </div>
+        </div>
+      )}
+
+      {/* Security & Validity Disclaimer */}
+      <div className="text-[8px] text-center text-slate-700 leading-tight pt-1 border-t border-dashed border-black">
+        <div>{settings.footerDisclaimer}</div>
+        <div className="mt-0.5">Printed via Incubation Hardware Terminal</div>
+      </div>
+
+      {/* Feed & Cut Margin Buffer (Ensures physical cutter doesn't clip text) */}
+      <div className="pt-8 text-center text-[7px] text-slate-400 select-none">
+        - - - - - - - - - - - - - - - - - -
       </div>
     </div>
   );
