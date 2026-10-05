@@ -8,8 +8,7 @@ import { logoutStaff, getStaffSession, type StaffSessionUser } from '@/actions/a
 
 const navItems = [
   { to: '/dashboard', icon: '⊞', label: 'Dashboard' },
-  { to: '/students', icon: '◉', label: 'Students' },
-  { to: '/projects', icon: '◈', label: 'Projects' },
+  { to: '/students', icon: '👥', label: 'Members & Mentors' },
   { to: '/daily-food-list', icon: '▤', label: 'Daily Food List' },
   { to: '/scan-token', icon: '⊙', label: 'Scan & Token' },
 ];

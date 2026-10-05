@@ -2,12 +2,22 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Badge from '@/components/Badge';
-import { getStudentsBundle, createStudent, updateStudent, deleteStudent, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import {
+  getStudentsBundle,
+  createStudent,
+  createIntern,
+  updateStudent,
+  deleteStudent,
+  createMentor,
+  assignMentor,
+  type StudentRecord,
+  type ProjectRecord,
+  type MentorRecord,
+} from '@/actions/studentActions';
 
 import {
   UNDERGRAD_DEPARTMENTS,
   POSTGRAD_DEPARTMENTS,
-  ALL_DEPARTMENTS,
 } from '@/utils/departmentUtils';
 
 const years = ['All', '1', '2', '3', '4', '5'];
@@ -17,6 +27,7 @@ type View = 'list' | 'detail';
 interface CachedStudentsPayload {
   students: StudentRecord[];
   projects: ProjectRecord[];
+  mentors?: MentorRecord[];
   timestamp: number;
 }
 
@@ -46,14 +57,56 @@ export default function Students() {
 
   const [studentList, setStudentList] = useState<StudentRecord[]>(() => initialCache?.students ?? []);
   const [projectList, setProjectList] = useState<ProjectRecord[]>(() => initialCache?.projects ?? []);
+  const [mentorList, setMentorList] = useState<MentorRecord[]>(() => initialCache?.mentors ?? []);
   const [loading, setLoading] = useState(() => !initialCache);
+  
+  // Navigation & Category tabs
+  const [categoryTab, setCategoryTab] = useState<'all' | 'students' | 'interns' | 'mentors'>('all');
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('All');
   const [deptFilter, setDeptFilter] = useState('All');
   const [yearFilter, setYearFilter] = useState('All');
   const [view, setView] = useState<View>('list');
   const [selected, setSelected] = useState<StudentRecord | null>(null);
+
+  // Add Member Modal states
   const [showAdd, setShowAdd] = useState(false);
+  const [memberType, setMemberType] = useState<'student' | 'intern'>('student');
+  const [form, setForm] = useState({
+    id: '',
+    name: '',
+    courseType: 'Bachelor',
+    department: 'Computer Science and Engineering',
+    year: '1',
+    email: '',
+    phone: '',
+    status: 'Active',
+    mentorCode: '',
+  });
+  const [internForm, setInternForm] = useState({
+    name: '',
+    phone: '',
+    startupName: '',
+    mentorCode: '',
+  });
+  const [formError, setFormError] = useState('');
+
+  // Inline Add Mentor states for Add Member modal
+  const [isAddingNewMentorInline, setIsAddingNewMentorInline] = useState(false);
+  const [inlineMentorName, setInlineMentorName] = useState('');
+  const [inlineMentorDept, setInlineMentorDept] = useState('');
+
+  // Add Mentor Modal states
+  const [showAddMentor, setShowAddMentor] = useState(false);
+  const [mentorForm, setMentorForm] = useState({
+    name: '',
+    department: 'Incubation Center',
+    designation: 'Faculty Mentor',
+  });
+  const [mentorFormError, setMentorFormError] = useState('');
+  const [isSavingMentor, setIsSavingMentor] = useState(false);
+
+  // Edit Member Modal states
   const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
   const [studentToEdit, setStudentToEdit] = useState<StudentRecord | null>(null);
   const [editForm, setEditForm] = useState({
@@ -64,26 +117,35 @@ export default function Students() {
     email: '',
     phone: '',
     status: 'Active',
+    mentorCode: '',
   });
   const [editFormError, setEditFormError] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editIsAddingNewMentorInline, setEditIsAddingNewMentorInline] = useState(false);
+  const [editInlineMentorName, setEditInlineMentorName] = useState('');
+  const [editInlineMentorDept, setEditInlineMentorDept] = useState('');
   const [toast, setToast] = useState('');
-
-  const [form, setForm] = useState({
-    id: '',
-    name: '',
-    courseType: 'Bachelor',
-    department: 'Computer Science and Engineering',
-    year: '1',
-    email: '',
-    phone: '',
-    status: 'Active',
-  });
-  const [formError, setFormError] = useState('');
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
+  };
+
+  const handleOpenAddModal = (type: 'student' | 'intern') => {
+    setMemberType(type);
+    setShowAdd(true);
+    setIsAddingNewMentorInline(false);
+    setInlineMentorName('');
+    setInlineMentorDept('');
+    setFormError('');
+  };
+
+  const handleCloseAddModal = () => {
+    setShowAdd(false);
+    setIsAddingNewMentorInline(false);
+    setInlineMentorName('');
+    setInlineMentorDept('');
+    setFormError('');
   };
 
   const loadData = useCallback(async (isBackground = false) => {
@@ -92,10 +154,12 @@ export default function Students() {
       const bundle = await getStudentsBundle();
       setStudentList(bundle.students);
       setProjectList(bundle.projects);
+      setMentorList(bundle.mentors || []);
 
       const payload: CachedStudentsPayload = {
         students: bundle.students,
         projects: bundle.projects,
+        mentors: bundle.mentors,
         timestamp: Date.now(),
       };
       memoryStudentsCache = payload;
@@ -106,7 +170,7 @@ export default function Students() {
       }
     } catch (e) {
       console.error(e);
-      showToast('Error loading student records.');
+      showToast('Error loading registry records.');
     } finally {
       setLoading(false);
     }
@@ -121,9 +185,27 @@ export default function Students() {
     }
   }, [loadData, initialCache]);
 
+  // Derived Preview ID for intern registration
+  const internCleanDigits = internForm.phone.replace(/\D/g, '');
+  const internPreviewId = internCleanDigits.length >= 4 ? `INT-${internCleanDigits.slice(-4)}` : 'INT-XXXX';
+
   const filtered = studentList.filter(s => {
+    const isIntern = s.category === 'Intern' || s.courseType === 'Intern' || s.id.startsWith('INT-');
+
+    if (categoryTab === 'students' && isIntern) return false;
+    if (categoryTab === 'interns' && !isIntern) return false;
+
     const q = search.toLowerCase();
-    const matchQ = !q || s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    const matchQ =
+      !q ||
+      s.id.toLowerCase().includes(q) ||
+      s.name.toLowerCase().includes(q) ||
+      s.email.toLowerCase().includes(q) ||
+      (s.phone && s.phone.includes(q)) ||
+      (s.startupName && s.startupName.toLowerCase().includes(q)) ||
+      (s.department && s.department.toLowerCase().includes(q)) ||
+      (s.mentorName && s.mentorName.toLowerCase().includes(q));
+
     const matchCourse = courseFilter === 'All' || (s.courseType || 'Bachelor') === courseFilter;
     const matchDept =
       deptFilter === 'All' ||
@@ -142,101 +224,241 @@ export default function Students() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, courseFilter, deptFilter, yearFilter]);
+  }, [search, courseFilter, deptFilter, yearFilter, categoryTab]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const startIndex = (currentPage - 1) * PAGE_SIZE;
   const paginatedStudents = filtered.slice(startIndex, startIndex + PAGE_SIZE);
 
-  const saveStudent = async () => {
-    if (!form.id || !form.name || !form.email) {
-      setFormError('Student Roll ID, Name, and Email are required.');
+  // Save Student or Intern
+  const handleSaveMember = async () => {
+    setFormError('');
+
+    let resolvedMentorCode: string | undefined = undefined;
+    if (isAddingNewMentorInline) {
+      if (!inlineMentorName.trim()) {
+        setFormError('Please enter the Mentor Name or click "Cancel" to select an existing mentor.');
+        return;
+      }
+      try {
+        const mRes = await createMentor({
+          name: inlineMentorName.trim(),
+          department: inlineMentorDept.trim() || 'Incubation Center',
+          designation: 'Faculty Mentor',
+        });
+        if (!mRes.success || !mRes.mentor) {
+          setFormError(mRes.message || 'Error creating new mentor.');
+          return;
+        }
+        resolvedMentorCode = mRes.mentor.id || mRes.mentor.code;
+      } catch (err: any) {
+        setFormError(err?.message || 'Failed to create mentor.');
+        return;
+      }
+    } else {
+      resolvedMentorCode = (memberType === 'intern' ? internForm.mentorCode : form.mentorCode) || undefined;
+    }
+
+    if (memberType === 'intern') {
+      if (!internForm.name.trim()) {
+        setFormError('Intern Full Name is required.');
+        return;
+      }
+      if (internCleanDigits.length < 4) {
+        setFormError('Please enter a valid phone number (at least 4 digits needed for ID).');
+        return;
+      }
+      if (!internForm.startupName.trim()) {
+        setFormError('Startup / Company Name is required.');
+        return;
+      }
+
+      const res = await createIntern({
+        name: internForm.name,
+        phone: internForm.phone,
+        startupName: internForm.startupName,
+        mentorCode: resolvedMentorCode,
+      });
+
+      if (res.success) {
+        showToast(res.message);
+        setInternForm({ name: '', phone: '', startupName: '', mentorCode: '' });
+        setIsAddingNewMentorInline(false);
+        setInlineMentorName('');
+        setInlineMentorDept('');
+        setShowAdd(false);
+        await loadData();
+      } else {
+        setFormError(res.message);
+      }
+    } else {
+      // College Student
+      if (!form.id || !form.name || !form.email) {
+        setFormError('Student Roll ID, Name, and Email are required.');
+        return;
+      }
+
+      const res = await createStudent({
+        id: form.id,
+        name: form.name,
+        courseType: form.courseType,
+        department: form.department,
+        year: Number(form.year),
+        email: form.email,
+        phone: form.phone,
+        status: form.status,
+        mentorId: resolvedMentorCode,
+      });
+
+      if (res.success) {
+        showToast(res.message);
+        setForm({
+          id: '',
+          name: '',
+          courseType: 'Bachelor',
+          department: 'Computer Science and Engineering',
+          year: '1',
+          email: '',
+          phone: '',
+          status: 'Active',
+          mentorCode: '',
+        });
+        setIsAddingNewMentorInline(false);
+        setInlineMentorName('');
+        setInlineMentorDept('');
+        setShowAdd(false);
+        await loadData();
+      } else {
+        setFormError(res.message);
+      }
+    }
+  };
+
+  // Save Mentor
+  const handleSaveMentor = async () => {
+    if (!mentorForm.name.trim()) {
+      setMentorFormError('Mentor Name is required.');
       return;
     }
 
-    const res = await createStudent({
-      id: form.id,
-      name: form.name,
-      courseType: form.courseType,
-      department: form.department,
-      year: Number(form.year),
-      email: form.email,
-      phone: form.phone,
-      status: form.status,
-    });
+    setIsSavingMentor(true);
+    setMentorFormError('');
+    try {
+      const res = await createMentor({
+        name: mentorForm.name,
+        department: mentorForm.department,
+        designation: mentorForm.designation,
+      });
 
-    if (res.success) {
-      showToast(res.message);
-      setForm({ id: '', name: '', courseType: 'Bachelor', department: 'Computer Science and Engineering', year: '1', email: '', phone: '', status: 'Active' });
-      setFormError('');
-      setShowAdd(false);
-      await loadData();
-    } else {
-      setFormError(res.message);
+      if (res.success) {
+        showToast(res.message);
+        setMentorForm({ name: '', department: 'Incubation Center', designation: 'Faculty Mentor' });
+        setShowAddMentor(false);
+        await loadData();
+      } else {
+        setMentorFormError(res.message);
+      }
+    } catch (e: any) {
+      setMentorFormError(e?.message || 'Error creating mentor.');
+    } finally {
+      setIsSavingMentor(false);
     }
   };
 
   const handleConfirmDelete = async () => {
     if (!studentToDelete) return;
-    const res = await deleteStudent(studentToDelete.id);
-    if (res.success) {
+    try {
+      const res = await deleteStudent(studentToDelete.id);
       showToast(res.message);
       setStudentToDelete(null);
-      if (selected?.id === studentToDelete.id) {
-        setSelected(null);
-        setView('list');
-      }
       await loadData();
-    } else {
-      showToast(res.message);
+    } catch (e) {
+      showToast('Error deleting student.');
     }
   };
 
   const handleOpenEdit = (student: StudentRecord) => {
+    const isIntern = student.category === 'Intern' || student.courseType === 'Intern' || student.id.startsWith('INT-');
     setStudentToEdit(student);
     setEditForm({
       name: student.name,
-      courseType: student.courseType || 'Bachelor',
-      department: student.department,
-      year: String(student.year),
+      courseType: student.courseType || (isIntern ? 'Intern' : 'Bachelor'),
+      department: student.startupName || student.department,
+      year: String(student.year || 0),
       email: student.email,
       phone: student.phone || '',
       status: student.status,
+      mentorCode: student.mentorCode || '',
     });
+    setEditIsAddingNewMentorInline(false);
+    setEditInlineMentorName('');
+    setEditInlineMentorDept('');
     setEditFormError('');
   };
 
   const handleSaveEdit = async () => {
     if (!studentToEdit) return;
-    if (!editForm.name.trim() || !editForm.email.trim()) {
-      setEditFormError('Student Name and Email are required.');
+    const isIntern = studentToEdit.category === 'Intern' || studentToEdit.courseType === 'Intern' || studentToEdit.id.startsWith('INT-');
+
+    if (!editForm.name.trim()) {
+      setEditFormError('Full Name is required.');
+      return;
+    }
+    if (!isIntern && !editForm.email.trim()) {
+      setEditFormError('Email is required for college students.');
       return;
     }
 
     setIsSavingEdit(true);
     setEditFormError('');
+
+    let resolvedEditMentorCode = editForm.mentorCode;
+    if (editIsAddingNewMentorInline) {
+      if (!editInlineMentorName.trim()) {
+        setEditFormError('Please enter the Mentor Name or click "Cancel" to select an existing mentor.');
+        setIsSavingEdit(false);
+        return;
+      }
+      try {
+        const mRes = await createMentor({
+          name: editInlineMentorName.trim(),
+          department: editInlineMentorDept.trim() || 'Incubation Center',
+          designation: 'Faculty Mentor',
+        });
+        if (!mRes.success || !mRes.mentor) {
+          setEditFormError(mRes.message || 'Error creating new mentor.');
+          setIsSavingEdit(false);
+          return;
+        }
+        resolvedEditMentorCode = mRes.mentor.id || mRes.mentor.code;
+      } catch (err: any) {
+        setEditFormError(err?.message || 'Failed to create mentor.');
+        setIsSavingEdit(false);
+        return;
+      }
+    }
+
     try {
       const res = await updateStudent(studentToEdit.id, {
         name: editForm.name,
-        courseType: editForm.courseType,
+        courseType: isIntern ? 'Intern' : editForm.courseType,
         department: editForm.department,
-        year: Number(editForm.year) || 1,
-        email: editForm.email,
+        year: isIntern ? 0 : Number(editForm.year) || 1,
+        email: editForm.email || (isIntern ? `intern.${studentToEdit.id.toLowerCase()}@incubation.local` : ''),
         phone: editForm.phone || null,
         status: editForm.status,
+        mentorId: resolvedEditMentorCode,
       });
 
       if (res.success && res.student) {
         showToast(res.message);
         const updated = res.student;
 
-        // Optimistically update local lists
         setStudentList(prev => prev.map(s => (s.id === updated.id ? updated : s)));
         if (selected && selected.id === updated.id) {
           setSelected(updated);
         }
 
-        // Update memory & storage cache
         if (memoryStudentsCache) {
           memoryStudentsCache.students = memoryStudentsCache.students.map(s =>
             s.id === updated.id ? updated : s
@@ -249,8 +471,12 @@ export default function Students() {
         }
 
         setStudentToEdit(null);
+        setEditIsAddingNewMentorInline(false);
+        setEditInlineMentorName('');
+        setEditInlineMentorDept('');
+        await loadData(true);
       } else {
-        setEditFormError(res.message || 'Error updating student.');
+        setEditFormError(res.message || 'Error updating member.');
       }
     } catch (e: any) {
       setEditFormError(e?.message || 'Server error while saving changes.');
@@ -260,45 +486,47 @@ export default function Students() {
   };
 
   if (view === 'detail' && selected) {
-    const studentProjects = projectList.filter(p => p.members.some(m => m.studentId === selected.id));
+    const isIntern = selected.category === 'Intern' || selected.courseType === 'Intern' || selected.id.startsWith('INT-');
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <button onClick={() => setView('list')} className="text-sm text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer">
-            ← Back to Students
+            ← Back to Registry
           </button>
           <div className="flex items-center gap-2">
             <button
               onClick={() => handleOpenEdit(selected)}
               className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
             >
-              ✏️ Edit Student
+              ✏️ Edit Member
             </button>
             <button
               onClick={() => setStudentToDelete(selected)}
               className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-xs"
             >
-              Delete Student
+              🗑 Delete
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-14 h-14 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xl font-bold">
-                {selected.name[0]}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-lg">
+                {isIntern ? '💼' : selected.name[0]}
               </div>
               <div>
-                <div className="font-bold text-slate-800 text-lg">{selected.name}</div>
-                <div className="text-sm text-slate-500 font-mono font-medium tracking-wide">{selected.id}</div>
+                <h3 className="font-semibold text-slate-800 text-lg leading-tight">{selected.name}</h3>
+                <span className="font-mono text-xs text-indigo-700 font-bold">{selected.id}</span>
               </div>
             </div>
-            <div className="space-y-2 text-sm">
+
+            <div className="text-xs space-y-2 pt-2 border-t border-slate-100">
               {[
-                { l: 'Course Type', v: selected.courseType || 'Bachelor' },
-                { l: 'Department', v: selected.department },
-                { l: 'Year', v: `Year ${selected.year}` },
+                { l: 'Category', v: isIntern ? 'Startup Intern' : 'College Student' },
+                { l: isIntern ? 'Startup / Company' : 'Department', v: selected.startupName || selected.department },
+                { l: 'Assigned Mentor', v: selected.mentorName || 'Unassigned' },
+                { l: isIntern ? 'Role' : 'Year of Study', v: isIntern ? 'Intern' : `Year ${selected.year}` },
                 { l: 'Email', v: selected.email },
                 { l: 'Phone', v: selected.phone || '—' },
               ].map(row => (
@@ -316,33 +544,20 @@ export default function Students() {
 
           <div className="lg:col-span-2 space-y-4">
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
-              <h3 className="font-semibold text-slate-800 mb-3">Project Memberships</h3>
-              {studentProjects.length === 0 ? (
-                <p className="text-sm text-slate-400">Not assigned to any project team yet.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      {['Project Name', 'Code', 'Role', 'Status'].map(h => (
-                        <th key={h} className="text-left py-2 pr-4 text-xs font-semibold text-slate-500 uppercase">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {studentProjects.map(p => {
-                      const member = p.members.find(m => m.studentId === selected.id);
-                      return (
-                        <tr key={p.code} className="border-b border-slate-50">
-                          <td className="py-2.5 pr-4 font-medium text-slate-700">{p.name}</td>
-                          <td className="py-2.5 pr-4 text-xs text-slate-400 font-mono font-medium">{p.code}</td>
-                          <td className="py-2.5 pr-4 text-slate-600 text-xs">{member?.role || 'Member'}</td>
-                          <td className="py-2.5"><Badge status={p.status} /></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
+              <h3 className="font-semibold text-slate-800 mb-2">Mentor &amp; Incubation Alignment</h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Assigned under <strong className="text-slate-800">{selected.mentorName || 'Unassigned Cohort'}</strong>.
+              </p>
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Affiliation:</span>
+                  <span className="font-semibold text-slate-800">{selected.startupName || selected.department}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Mess Eligibility:</span>
+                  <span className="text-emerald-700 font-bold">Enabled for Night Stay Shifts</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -352,350 +567,833 @@ export default function Students() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Header & Category Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-slate-800">Student Master Registry</h2>
-          <p className="text-sm text-slate-500">{studentList.length} students registered in incubation database</p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Members &amp; Students Registry</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Manage college students, startup interns, and assigned mentors in the incubation facility.
+          </p>
         </div>
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => setShowAdd(true)}
-            className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
-          >
-            + Add Student
-          </button>
-        </div>
-      </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by Roll No / ID, name, or email…"
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-72 bg-white"
-        />
-        <select
-          value={courseFilter}
-          onChange={e => setCourseFilter(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-        >
-          <option value="All">All Course Types</option>
-          <option value="Bachelor">Bachelor</option>
-          <option value="Master">Master</option>
-        </select>
-        <select
-          value={deptFilter}
-          onChange={e => setDeptFilter(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white max-w-xs"
-        >
-          <option value="All">All Departments</option>
-          <optgroup label="Bachelor Programs (B.E. / B.Tech)">
-            {UNDERGRAD_DEPARTMENTS.map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </optgroup>
-          <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
-            {POSTGRAD_DEPARTMENTS.map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </optgroup>
-        </select>
-        <select
-          value={yearFilter}
-          onChange={e => setYearFilter(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-        >
-          {years.map(y => <option key={y} value={y}>{y === 'All' ? 'All Years' : `Year ${y}`}</option>)}
-        </select>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-        {loading ? (
-          <div className="py-16 text-center text-slate-400 text-sm">
-            <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-2"></div>
-            Loading students registry...
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <div className="text-3xl mb-3">👤</div>
-            <div className="font-medium text-slate-700">No students found</div>
-            <div className="text-sm text-slate-400 mt-1">Try adjusting your search or filters.</div>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          {categoryTab === 'mentors' ? (
             <button
-              onClick={() => setShowAdd(true)}
-              className="mt-4 bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-800 transition-colors cursor-pointer"
+              onClick={() => setShowAddMentor(true)}
+              className="bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
             >
-              + Add Student
+              <span>+</span>
+              <span>Add Mentor</span>
             </button>
-          </div>
-        ) : (
-          <div>
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="text-center py-3 px-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-14">S.No</th>
-                  {['Roll No / ID', 'Name', 'Course', 'Department', 'Year', 'Email', 'Projects', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedStudents.map((s, idx) => (
-                  <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-3 text-xs text-slate-500 font-medium text-center">{startIndex + idx + 1}</td>
-                    <td className="py-3 px-4 text-xs text-indigo-700 font-semibold tracking-wide font-mono">{s.id}</td>
-                    <td className="py-3 px-4 font-medium text-slate-800">{s.name}</td>
-                    <td className="py-3 px-4 text-xs">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${
-                        s.courseType === 'Master'
-                          ? 'bg-purple-50 text-purple-700 border-purple-200'
-                          : 'bg-sky-50 text-sky-700 border-sky-200'
-                      }`}>
-                        {s.courseType || 'Bachelor'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-slate-600 text-xs">{s.department}</td>
-                    <td className="py-3 px-4 text-slate-600 text-xs">Year {s.year}</td>
-                    <td className="py-3 px-4 text-slate-500 text-xs font-mono">{s.email}</td>
-                    <td className="py-3 px-4 text-slate-500 text-xs">
-                      {s.projects.length > 0 ? (
-                        <span className="font-semibold text-slate-700">{s.projects.join(', ')}</span>
-                      ) : (
-                        <span className="text-slate-400">None</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4"><Badge status={s.status} /></td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <button
-                        onClick={() => handleOpenEdit(s)}
-                        className="text-xs text-amber-700 hover:text-amber-900 font-semibold hover:underline mr-3 cursor-pointer inline-flex items-center gap-1"
-                        title="Quick edit student details"
-                      >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        onClick={() => { setSelected(s); setView('detail'); }}
-                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline mr-3 cursor-pointer"
-                      >
-                        View Profile
-                      </button>
-                      <button
-                        onClick={() => setStudentToDelete(s)}
-                        className="text-xs text-rose-600 hover:text-rose-800 font-medium hover:underline cursor-pointer"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          ) : categoryTab === 'students' ? (
+            <button
+              onClick={() => handleOpenAddModal('student')}
+              className="bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+            >
+              <span>+</span>
+              <span>Add Student</span>
+            </button>
+          ) : categoryTab === 'interns' ? (
+            <button
+              onClick={() => handleOpenAddModal('intern')}
+              className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+            >
+              <span>+</span>
+              <span>Add Startup Intern</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleOpenAddModal('student')}
+                className="bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+              >
+                <span>+</span>
+                <span>Add Student</span>
+              </button>
+              <button
+                onClick={() => handleOpenAddModal('intern')}
+                className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+              >
+                <span>+</span>
+                <span>Add Startup Intern</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
 
-            {/* Pagination Controls */}
-            {filtered.length > 0 && (
-              <div className="px-5 py-3.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50/50">
-                <div>
-                  Showing <span className="font-semibold text-slate-800">{filtered.length > 0 ? startIndex + 1 : 0}</span> to{' '}
-                  <span className="font-semibold text-slate-800">{Math.min(startIndex + PAGE_SIZE, filtered.length)}</span> of{' '}
-                  <span className="font-semibold text-slate-800">{filtered.length}</span> students
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
-                  >
-                    ← Previous
-                  </button>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setCurrentPage(p)}
-                        className={`w-7 h-7 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                          currentPage === p
-                            ? 'bg-indigo-700 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-200/70'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    disabled={currentPage === totalPages}
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
-                  >
-                    Next →
-                  </button>
-                </div>
+      {/* Segmented Category Tabs */}
+      <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/80 w-fit overflow-x-auto max-w-full">
+        <button
+          onClick={() => setCategoryTab('all')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            categoryTab === 'all'
+              ? 'bg-white text-indigo-700 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          All Members ({studentList.length})
+        </button>
+
+        <button
+          onClick={() => setCategoryTab('students')}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            categoryTab === 'students'
+              ? 'bg-white text-indigo-700 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <span>🎓</span>
+          <span>Students ({studentList.filter(s => s.category !== 'Intern' && s.courseType !== 'Intern').length})</span>
+        </button>
+
+        <button
+          onClick={() => setCategoryTab('interns')}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            categoryTab === 'interns'
+              ? 'bg-white text-amber-800 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <span>💼</span>
+          <span>Startup Interns ({studentList.filter(s => s.category === 'Intern' || s.courseType === 'Intern').length})</span>
+        </button>
+
+        <button
+          onClick={() => setCategoryTab('mentors')}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            categoryTab === 'mentors'
+              ? 'bg-white text-indigo-700 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <span>👥</span>
+          <span>Mentors ({mentorList.length})</span>
+        </button>
+      </div>
+
+      {/* MENTORS VIEW TAB */}
+      {categoryTab === 'mentors' ? (
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Incubation Mentors</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Mentors guide students and startup cohorts. You can add mentors here or assign members to mentors.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddMentor(true)}
+                className="text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                + Create Mentor
+              </button>
+            </div>
+
+            {mentorList.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 text-sm">
+                <div className="text-3xl mb-2">👥</div>
+                <div className="font-semibold text-slate-700">No mentors configured yet</div>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                  Once you receive the list of mentors, click &ldquo;Add Mentor&rdquo; above to register them.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {mentorList.map(m => {
+                  const assignedCount = studentList.filter(s => s.mentorId === m.id || s.mentorCode === (m.id || m.code) || s.mentorName === m.name).length;
+                  return (
+                    <div key={m.id || m.code} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm">{m.name}</h4>
+                          <span className="text-xs text-slate-500">{m.department} · {m.designation}</span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {assignedCount} Mentees
+                        </span>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500">
+                        <span className="font-medium text-slate-600">{m.designation || 'Faculty Mentor'}</span>
+                        <span className="text-emerald-700 font-semibold font-sans">Active</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        /* MEMBERS & STUDENTS TABLE VIEW */
+        <>
+          {/* Filters Bar */}
+          <div className="flex flex-wrap gap-3">
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by ID / Last 4 digits, Name, Startup, or Mentor…"
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-80 bg-white"
+            />
+            {categoryTab !== 'interns' && (
+              <>
+                <select
+                  value={courseFilter}
+                  onChange={e => setCourseFilter(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                >
+                  <option value="All">All Course Types</option>
+                  <option value="Bachelor">Bachelor</option>
+                  <option value="Master">Master</option>
+                </select>
+                <select
+                  value={deptFilter}
+                  onChange={e => setDeptFilter(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white max-w-xs"
+                >
+                  <option value="All">All Departments</option>
+                  <optgroup label="Bachelor Programs (B.E. / B.Tech)">
+                    {UNDERGRAD_DEPARTMENTS.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
+                    {POSTGRAD_DEPARTMENTS.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </optgroup>
+                </select>
+                <select
+                  value={yearFilter}
+                  onChange={e => setYearFilter(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                >
+                  {years.map(y => <option key={y} value={y}>{y === 'All' ? 'All Years' : `Year ${y}`}</option>)}
+                </select>
+              </>
+            )}
+          </div>
 
-      {/* Add Student Modal */}
+          {/* Table Container */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+            {loading ? (
+              <div className="py-16 text-center text-slate-400 text-sm">
+                <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-2"></div>
+                Loading master registry...
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="text-3xl mb-3">👤</div>
+                <div className="font-medium text-slate-700">No members found</div>
+                <div className="text-sm text-slate-400 mt-1">Try adjusting your search or filters.</div>
+                {categoryTab === 'interns' ? (
+                  <button
+                    onClick={() => handleOpenAddModal('intern')}
+                    className="mt-4 bg-amber-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <span>+</span>
+                    <span>Add Startup Intern</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleOpenAddModal('student')}
+                    className="mt-4 bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-800 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <span>+</span>
+                    <span>Add Student</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div>
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    <tr>
+                      <th className="text-center py-3 px-3 w-12">S.No</th>
+                      <th className="py-3 px-4">Member ID</th>
+                      <th className="py-3 px-4">Member Name</th>
+                      <th className="py-3 px-4">Affiliation / Dept</th>
+                      <th className="py-3 px-4">Mentor</th>
+                      <th className="py-3 px-4">Year / Role</th>
+                      <th className="py-3 px-4">Contact</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {paginatedStudents.map((s, idx) => {
+                      const isIntern = s.category === 'Intern' || s.courseType === 'Intern' || s.id.startsWith('INT-');
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-3 text-xs text-slate-500 font-medium text-center">{startIndex + idx + 1}</td>
+                          <td className="py-3 px-4 text-xs font-mono font-bold">
+                            <span className={isIntern ? 'text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200' : 'text-indigo-700'}>
+                              {s.id}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-medium text-slate-800">
+                            <div className="flex items-center gap-1.5">
+                              <span>{s.name}</span>
+                              {isIntern && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                  💼 INTERN
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-xs font-medium text-slate-700">
+                            {isIntern ? (
+                              <span className="font-bold text-amber-900">{s.startupName || s.department}</span>
+                            ) : (
+                              <span>{s.department}</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-xs">
+                            <span className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                              s.mentorName && s.mentorName !== 'Unassigned'
+                                ? 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                                : 'text-slate-400 bg-slate-100 border border-slate-200 font-normal'
+                            }`}>
+                              {s.mentorName || 'Unassigned'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-xs text-slate-600">
+                            {isIntern ? (
+                              <span className="text-slate-500 font-mono text-[11px]">Startup Intern</span>
+                            ) : (
+                              <span>Year {s.year} · {s.courseType}</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-slate-500">
+                            <div>{s.phone || '—'}</div>
+                            <div className="text-[11px] text-slate-400 font-mono truncate max-w-xs">{s.email}</div>
+                          </td>
+                          <td className="py-3 px-4"><Badge status={s.status} /></td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <button
+                              onClick={() => handleOpenEdit(s)}
+                              className="text-xs text-amber-700 hover:text-amber-900 font-semibold hover:underline mr-3 cursor-pointer inline-flex items-center gap-1"
+                              title="Quick edit member details"
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              onClick={() => { setSelected(s); setView('detail'); }}
+                              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline mr-3 cursor-pointer"
+                            >
+                              Profile
+                            </button>
+                            <button
+                              onClick={() => setStudentToDelete(s)}
+                              className="text-xs text-rose-600 hover:text-rose-800 font-medium hover:underline cursor-pointer"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Pagination Controls */}
+                {filtered.length > 0 && (
+                  <div className="px-5 py-3.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50/50">
+                    <div>
+                      Showing <span className="font-semibold text-slate-800">{filtered.length > 0 ? startIndex + 1 : 0}</span> to{' '}
+                      <span className="font-semibold text-slate-800">{Math.min(startIndex + PAGE_SIZE, filtered.length)}</span> of{' '}
+                      <span className="font-semibold text-slate-800">{filtered.length}</span> members
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
+                      >
+                        ← Previous
+                      </button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                          <button
+                            key={p}
+                            onClick={() => setCurrentPage(p)}
+                            className={`w-7 h-7 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                              currentPage === p
+                                ? 'bg-indigo-700 text-white shadow-xs'
+                                : 'text-slate-600 hover:bg-slate-200/70'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODALS                                                                    */}
+      {/* ========================================================================= */}
+
+      {/* ADD MEMBER MODAL (Students & Startup Interns) */}
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h3 className="font-semibold text-slate-800 text-lg">Add Student to Registry</h3>
-              <button onClick={() => { setShowAdd(false); setFormError(''); }} className="text-slate-400 hover:text-slate-600 text-xl leading-none cursor-pointer">×</button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Student Roll Number / ID *</label>
-                <input
-                  type="text"
-                  value={form.id}
-                  onChange={e => setForm(p => ({ ...p, id: e.target.value.toUpperCase() }))}
-                  placeholder="e.g. 23CS108"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Anand R"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Institutional Email *</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
-                  placeholder="anand@college.edu"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
-                <input
-                  type="text"
-                  value={form.phone}
-                  onChange={e => setForm(p => ({ ...p, phone: e.target.value }))}
-                  placeholder="9876543210"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Course Type *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForm(p => ({
-                        ...p,
-                        courseType: 'Bachelor',
-                        department: UNDERGRAD_DEPARTMENTS[0],
-                        year: '1',
-                      }));
-                    }}
-                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
-                      form.courseType === 'Bachelor'
-                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
-                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    🎓 Bachelor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForm(p => ({
-                        ...p,
-                        courseType: 'Master',
-                        department: POSTGRAD_DEPARTMENTS[0],
-                        year: '1',
-                      }));
-                    }}
-                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
-                      form.courseType === 'Master'
-                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
-                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    📜 Master
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    {form.courseType === 'Master' ? 'Master Program *' : 'Department *'}
-                  </label>
-                  <select
-                    value={form.department}
-                    onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                  >
-                    {form.courseType === 'Master' ? (
-                      <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
-                        {POSTGRAD_DEPARTMENTS.map(d => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </optgroup>
-                    ) : (
-                      <optgroup label="Bachelor Programs (B.E. / B.Tech)">
-                        {UNDERGRAD_DEPARTMENTS.map(d => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-                </div>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">{memberType === 'intern' ? '💼' : '🎓'}</span>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Year of Study *</label>
-                  <select
-                    value={form.year}
-                    onChange={e => setForm(p => ({ ...p, year: e.target.value }))}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {(form.department.includes('Integrated')
-                      ? ['1', '2', '3', '4', '5']
-                      : form.courseType === 'Master'
-                      ? ['1', '2']
-                      : ['1', '2', '3', '4']
-                    ).map(y => (
-                      <option key={y} value={y}>Year {y}</option>
-                    ))}
-                  </select>
+                  <h3 className="font-bold text-slate-900 text-lg leading-tight">
+                    {memberType === 'intern' ? 'Register Startup Intern' : 'Register College Student'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {memberType === 'intern'
+                      ? 'Onboard incubation startup intern with mobile number lookup'
+                      : 'Add a new student to institutional registry and assign an optional mentor'}
+                  </p>
                 </div>
               </div>
-              {formError && <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">{formError}</p>}
+              <button
+                onClick={handleCloseAddModal}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none cursor-pointer"
+              >
+                ×
+              </button>
             </div>
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100">
-              <button onClick={() => { setShowAdd(false); setFormError(''); }} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* STARTUP INTERN FORM */}
+              {memberType === 'intern' ? (
+                <div className="space-y-4 pt-1">
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900">
+                    <strong className="font-semibold">Simple Intern Onboarding:</strong>
+                    <p className="mt-0.5 text-slate-600">
+                      Interns do not require college roll numbers. Their ID is automatically generated from the last 4 digits of their phone number!
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Intern Full Name *</label>
+                    <input
+                      type="text"
+                      value={internForm.name}
+                      onChange={e => setInternForm(p => ({ ...p, name: e.target.value }))}
+                      placeholder="e.g. Praveen Kumar"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Mobile Number *</label>
+                    <input
+                      type="text"
+                      value={internForm.phone}
+                      onChange={e => setInternForm(p => ({ ...p, phone: e.target.value }))}
+                      placeholder="e.g. 9876543210"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                    />
+                    <div className="flex items-center justify-between mt-1.5 text-xs">
+                      <span className="text-slate-500">Used for quick counter lookup</span>
+                      <span className="font-mono font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded border border-amber-300 text-[11px]">
+                        Assigned ID: {internPreviewId}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Startup / Company Name *</label>
+                    <input
+                      type="text"
+                      value={internForm.startupName}
+                      onChange={e => setInternForm(p => ({ ...p, startupName: e.target.value }))}
+                      placeholder="e.g. SkyRobotics Hub, AgriTech Innovations"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-slate-700">Assigned Mentor (Optional)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingNewMentorInline(p => !p);
+                          setInlineMentorName('');
+                          setInlineMentorDept('');
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                      >
+                        {isAddingNewMentorInline ? '← Select Existing' : '+ Type New Mentor'}
+                      </button>
+                    </div>
+
+                    {isAddingNewMentorInline ? (
+                      <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-indigo-900 flex items-center gap-1">
+                            <span>👥</span> Add Mentor On-the-Fly
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAddingNewMentorInline(false);
+                              setInlineMentorName('');
+                            }}
+                            className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={inlineMentorName}
+                            onChange={e => setInlineMentorName(e.target.value)}
+                            placeholder="Mentor Full Name (e.g. Dr. S. Ramesh) *"
+                            className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={inlineMentorDept}
+                            onChange={e => setInlineMentorDept(e.target.value)}
+                            placeholder="Department / Role (Optional, e.g. Incubation / Guide)"
+                            className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <p className="text-[10px] text-indigo-700">
+                          ✨ Will be automatically registered in Mentors directory and assigned to this intern upon saving.
+                        </p>
+                      </div>
+                    ) : (
+                      <select
+                        value={internForm.mentorCode}
+                        onChange={e => {
+                          if (e.target.value === '__NEW__') {
+                            setIsAddingNewMentorInline(true);
+                          } else {
+                            setInternForm(p => ({ ...p, mentorCode: e.target.value }));
+                          }
+                        }}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="">Unassigned (Default)</option>
+                        {mentorList.map(m => (
+                          <option key={m.id || m.code} value={m.id || m.code}>
+                            {m.name} ({m.department})
+                          </option>
+                        ))}
+                        <option value="__NEW__">➕ + Type New Mentor...</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* COLLEGE STUDENT FORM */
+                <div className="space-y-4 pt-1">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Student Roll Number / ID *</label>
+                    <input
+                      type="text"
+                      value={form.id}
+                      onChange={e => setForm(p => ({ ...p, id: e.target.value.toUpperCase() }))}
+                      placeholder="e.g. 23CS108"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                      placeholder="e.g. Anand R"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Course Type *</label>
+                      <select
+                        value={form.courseType}
+                        onChange={e => setForm(p => ({ ...p, courseType: e.target.value }))}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="Bachelor">Bachelor (B.E./B.Tech)</option>
+                        <option value="Master">Master (M.E./MBA)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Year of Study *</label>
+                      <select
+                        value={form.year}
+                        onChange={e => setForm(p => ({ ...p, year: e.target.value }))}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      >
+                        {['1', '2', '3', '4', '5'].map(y => (
+                          <option key={y} value={y}>Year {y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Department *</label>
+                    <select
+                      value={form.department}
+                      onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                    >
+                      {form.courseType === 'Master' ? (
+                        <optgroup label="Master &amp; Integrated Programs">
+                          {POSTGRAD_DEPARTMENTS.map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        <optgroup label="Bachelor Programs">
+                          {UNDERGRAD_DEPARTMENTS.map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-slate-700">Assigned Mentor (Optional)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingNewMentorInline(p => !p);
+                          setInlineMentorName('');
+                          setInlineMentorDept('');
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                      >
+                        {isAddingNewMentorInline ? '← Select Existing' : '+ Type New Mentor'}
+                      </button>
+                    </div>
+
+                    {isAddingNewMentorInline ? (
+                      <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-indigo-900 flex items-center gap-1">
+                            <span>👥</span> Add Mentor On-the-Fly
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAddingNewMentorInline(false);
+                              setInlineMentorName('');
+                            }}
+                            className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={inlineMentorName}
+                            onChange={e => setInlineMentorName(e.target.value)}
+                            placeholder="Mentor Full Name (e.g. Dr. S. Ramesh) *"
+                            className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={inlineMentorDept}
+                            onChange={e => setInlineMentorDept(e.target.value)}
+                            placeholder="Department / Role (Optional, e.g. CSE / Guide)"
+                            className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <p className="text-[10px] text-indigo-700">
+                          ✨ Will be automatically registered in Mentors directory and assigned to this student upon saving.
+                        </p>
+                      </div>
+                    ) : (
+                      <select
+                        value={form.mentorCode}
+                        onChange={e => {
+                          if (e.target.value === '__NEW__') {
+                            setIsAddingNewMentorInline(true);
+                          } else {
+                            setForm(p => ({ ...p, mentorCode: e.target.value }));
+                          }
+                        }}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="">Unassigned (Default)</option>
+                        {mentorList.map(m => (
+                          <option key={m.id || m.code} value={m.id || m.code}>
+                            {m.name} ({m.department})
+                          </option>
+                        ))}
+                        <option value="__NEW__">➕ + Type New Mentor...</option>
+                      </select>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Institutional Email *</label>
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
+                      placeholder="student@college.edu"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                    <input
+                      type="text"
+                      value={form.phone}
+                      onChange={e => setForm(p => ({ ...p, phone: e.target.value }))}
+                      placeholder="9876543210"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {formError && (
+                <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">
+                  {formError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
+              <button
+                type="button"
+                onClick={handleCloseAddModal}
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
                 Cancel
               </button>
-              <button onClick={saveStudent} className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer">
-                Save to Database
+              <button
+                type="button"
+                onClick={handleSaveMember}
+                className={`px-4 py-2 text-sm text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer ${
+                  memberType === 'intern' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-700 hover:bg-indigo-800'
+                }`}
+              >
+                {memberType === 'intern' ? 'Save Startup Intern' : 'Save Student'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Quick Edit Student Modal */}
+      {/* ADD MENTOR MODAL */}
+      {showAddMentor && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">👥</span>
+                <h3 className="font-bold text-slate-900 text-lg">Add Faculty Mentor</h3>
+              </div>
+              <button
+                onClick={() => { setShowAddMentor(false); setMentorFormError(''); }}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mentor Full Name *</label>
+                <input
+                  type="text"
+                  value={mentorForm.name}
+                  onChange={e => setMentorForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Dr. S. Ramesh"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Department / Facility Area</label>
+                <input
+                  type="text"
+                  value={mentorForm.department}
+                  onChange={e => setMentorForm(p => ({ ...p, department: e.target.value }))}
+                  placeholder="e.g. Computer Science / Incubation Lead"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Designation</label>
+                <input
+                  type="text"
+                  value={mentorForm.designation}
+                  onChange={e => setMentorForm(p => ({ ...p, designation: e.target.value }))}
+                  placeholder="e.g. Associate Professor / Start-up Advisor"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {mentorFormError && (
+                <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">
+                  {mentorFormError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => { setShowAddMentor(false); setMentorFormError(''); }}
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMentor}
+                disabled={isSavingMentor}
+                className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                {isSavingMentor ? 'Saving...' : 'Save Mentor'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK EDIT MEMBER MODAL */}
       {studentToEdit && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between p-5 border-b border-slate-200 shrink-0">
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-800 text-lg">Quick Edit Student</h3>
+                <h3 className="font-bold text-slate-800 text-lg">Quick Edit Member</h3>
                 <span className="font-mono text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200 font-semibold">
                   {studentToEdit.id}
                 </span>
@@ -709,10 +1407,10 @@ export default function Students() {
             </div>
 
             <div className="p-6 space-y-4 overflow-y-auto">
-              {/* Roll Number / ID (Read-only / Primary Key) */}
+              {/* Member ID (Locked) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
-                  <span>Student Roll Number / ID</span>
+                  <span>Unique Identifier</span>
                   <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-normal">
                     🔒 Primary Identifier (Cannot be changed)
                   </span>
@@ -737,107 +1435,120 @@ export default function Students() {
                 />
               </div>
 
-              {/* Course Type Toggle */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Course Type *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditForm(p => ({
-                        ...p,
-                        courseType: 'Bachelor',
-                        department: (UNDERGRAD_DEPARTMENTS as readonly string[]).includes(p.department) ? p.department : UNDERGRAD_DEPARTMENTS[0],
-                        year: Number(p.year) > 4 ? '4' : p.year,
-                      }));
-                    }}
-                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
-                      editForm.courseType === 'Bachelor'
-                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
-                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    🎓 Bachelor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditForm(p => ({
-                        ...p,
-                        courseType: 'Master',
-                        department: (POSTGRAD_DEPARTMENTS as readonly string[]).includes(p.department) ? p.department : POSTGRAD_DEPARTMENTS[0],
-                        year: p.department.includes('Integrated') ? (Number(p.year) > 5 ? '5' : p.year) : Number(p.year) > 2 ? '2' : p.year,
-                      }));
-                    }}
-                    className={`py-2 px-3 rounded-lg text-sm font-semibold border transition cursor-pointer text-center ${
-                      editForm.courseType === 'Master'
-                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold ring-1 ring-indigo-500'
-                        : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    📜 Master
-                  </button>
+              {/* Startup Name vs Academic Dept */}
+              {studentToEdit.category === 'Intern' || studentToEdit.courseType === 'Intern' || studentToEdit.id.startsWith('INT-') ? (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Startup / Company Name *</label>
+                  <input
+                    type="text"
+                    value={editForm.department}
+                    onChange={e => setEditForm(p => ({ ...p, department: e.target.value }))}
+                    placeholder="e.g. SkyRobotics Hub"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
                 </div>
-              </div>
-
-              {/* Department & Year */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    {editForm.courseType === 'Master' ? 'Master Program *' : 'Department *'}
-                  </label>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Department *</label>
                   <select
                     value={editForm.department}
                     onChange={e => setEditForm(p => ({ ...p, department: e.target.value }))}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
-                    {editForm.courseType === 'Master' ? (
-                      <optgroup label="Master & Integrated Programs (M.E. / M.Tech / MBA)">
-                        {POSTGRAD_DEPARTMENTS.map(d => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </optgroup>
-                    ) : (
-                      <optgroup label="Bachelor Programs (B.E. / B.Tech)">
-                        {UNDERGRAD_DEPARTMENTS.map(d => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </optgroup>
-                    )}
+                    <optgroup label="Bachelor Programs">
+                      {UNDERGRAD_DEPARTMENTS.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Master &amp; Integrated Programs">
+                      {POSTGRAD_DEPARTMENTS.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Year of Study *</label>
-                  <select
-                    value={editForm.year}
-                    onChange={e => setEditForm(p => ({ ...p, year: e.target.value }))}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {(editForm.department.includes('Integrated')
-                      ? ['1', '2', '3', '4', '5']
-                      : editForm.courseType === 'Master'
-                      ? ['1', '2']
-                      : ['1', '2', '3', '4']
-                    ).map(y => (
-                      <option key={y} value={y}>Year {y}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              )}
 
-              {/* Institutional Email */}
+              {/* Assigned Mentor */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Institutional Email *</label>
-                <input
-                  type="email"
-                  value={editForm.email}
-                  onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
-                  placeholder="student@college.edu"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-slate-700">Assigned Mentor</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditIsAddingNewMentorInline(p => !p);
+                      setEditInlineMentorName('');
+                      setEditInlineMentorDept('');
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                  >
+                    {editIsAddingNewMentorInline ? '← Select Existing' : '+ Type New Mentor'}
+                  </button>
+                </div>
+
+                {editIsAddingNewMentorInline ? (
+                  <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-indigo-900 flex items-center gap-1">
+                        <span>👥</span> Add Mentor On-the-Fly
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditIsAddingNewMentorInline(false);
+                          setEditInlineMentorName('');
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={editInlineMentorName}
+                        onChange={e => setEditInlineMentorName(e.target.value)}
+                        placeholder="Mentor Full Name (e.g. Dr. S. Ramesh) *"
+                        className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={editInlineMentorDept}
+                        onChange={e => setEditInlineMentorDept(e.target.value)}
+                        placeholder="Department / Role (Optional, e.g. CSE / Guide)"
+                        className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <p className="text-[10px] text-indigo-700">
+                      ✨ Will register mentor in directory and immediately link to this member upon saving.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={editForm.mentorCode}
+                    onChange={e => {
+                      if (e.target.value === '__NEW__') {
+                        setEditIsAddingNewMentorInline(true);
+                      } else {
+                        setEditForm(p => ({ ...p, mentorCode: e.target.value }));
+                      }
+                    }}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <option value="UNASSIGNED">Unassigned</option>
+                    {mentorList.map(m => (
+                      <option key={m.id || m.code} value={m.id || m.code}>
+                        {m.name} ({m.department})
+                      </option>
+                    ))}
+                    <option value="__NEW__">➕ + Type New Mentor...</option>
+                  </select>
+                )}
               </div>
 
-              {/* Phone & Status */}
+              {/* Contact Info */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
@@ -846,7 +1557,7 @@ export default function Students() {
                     value={editForm.phone}
                     onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))}
                     placeholder="9876543210"
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                   />
                 </div>
                 <div>
@@ -883,27 +1594,20 @@ export default function Students() {
                 disabled={isSavingEdit}
                 className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer flex items-center gap-1.5"
               >
-                {isSavingEdit ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  'Save Changes'
-                )}
+                {isSavingEdit ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* DELETE CONFIRMATION MODAL */}
       {studentToDelete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete or Archive Student?</h3>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete or Archive Member?</h3>
             <p className="text-sm text-slate-500 mb-4">
-              Are you sure you want to remove <span className="font-bold text-slate-800">{studentToDelete.name}</span> (<span className="font-mono text-indigo-700">{studentToDelete.id}</span>)? Active project assignments will be removed. All historical meal tokens and night-stay logs will be safely preserved.
+              Are you sure you want to remove <span className="font-bold text-slate-800">{studentToDelete.name}</span> (<span className="font-mono text-indigo-700">{studentToDelete.id}</span>)? All historical meal tokens and night-stay logs will be safely preserved.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -916,7 +1620,7 @@ export default function Students() {
                 onClick={handleConfirmDelete}
                 className="px-4 py-2 text-sm bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-medium transition-colors cursor-pointer shadow-xs"
               >
-                Delete Student
+                Delete Member
               </button>
             </div>
           </div>

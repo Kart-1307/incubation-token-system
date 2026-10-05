@@ -11,6 +11,7 @@ import {
   getDailyFoodList,
   addStudentToDailyList,
   addBulkStudentsToDailyList,
+  addBulkByMentorToDailyList,
   removeStudentFromDailyList,
   getDatewiseFoodLogs,
   getNightStayBatchAudit,
@@ -20,7 +21,15 @@ import {
   type DatewiseLogSummary,
   type NightStayBatchAuditDetails,
 } from '@/actions/foodListActions';
-import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
+import {
+  getStudents,
+  getProjects,
+  getMentors,
+  getStudentById,
+  type StudentRecord,
+  type ProjectRecord,
+  type MentorRecord,
+} from '@/actions/studentActions';
 import { getTodayISTDateString, getNextISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 
 type ActiveTab = 'list' | 'logs';
@@ -38,6 +47,7 @@ interface CachedDailyFoodListPayload {
 const globalDateCache = new Map<string, FoodListDetails>();
 let globalStudentsCache: StudentRecord[] = [];
 let globalProjectsCache: ProjectRecord[] = [];
+let globalMentorsCache: MentorRecord[] = [];
 let globalTokensCache: any[] = [];
 
 function getInitialWorkingDate(searchParams: { get: (k: string) => string | null }, todayStr: string): string {
@@ -174,6 +184,7 @@ function DailyFoodListContent() {
   const [currentList, setCurrentList] = useState<FoodListDetails>(() => initialData.list);
   const [studentRegistry, setStudentRegistry] = useState<StudentRecord[]>(() => initialData.students);
   const [projectRegistry, setProjectRegistry] = useState<ProjectRecord[]>(() => initialData.projects);
+  const [mentorRegistry, setMentorRegistry] = useState<MentorRecord[]>(() => globalMentorsCache);
   // Never show a blocking full-page loading spinner if initial shell exists!
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -235,9 +246,10 @@ function DailyFoodListContent() {
   }, [currentList]);
 
   const [searchId, setSearchId] = useState('');
+  const [isSearchingStudent, setIsSearchingStudent] = useState(false);
   const [foundStudent, setFoundStudent] = useState<StudentRecord | null | 'not-found'>(null);
-  const [selectedProject, setSelectedProject] = useState('');
-  const [bulkProject, setBulkProject] = useState('');
+  const [selectedMentor, setSelectedMentor] = useState('');
+  const [bulkMentor, setBulkMentor] = useState('');
   const [bulkSelected, setBulkSelected] = useState<string[]>([]);
   const [toast, setToast] = useState('');
 
@@ -308,20 +320,29 @@ function DailyFoodListContent() {
     router.replace(query ? `?${query}` : window.location.pathname, { scroll: false });
   };
 
-  // Load master student & project registries ONCE on mount (cached in memory)
+  // Load master student, project & mentor registries ONCE on mount (cached in memory)
   useEffect(() => {
     let isMounted = true;
-    if (globalStudentsCache.length === 0 || globalProjectsCache.length === 0) {
-      Promise.all([getStudents(), getProjects()])
-        .then(([students, projects]) => {
+    if (globalStudentsCache.length === 0 || globalProjectsCache.length === 0 || globalMentorsCache.length === 0) {
+      Promise.all([getStudents(), getProjects(), getMentors()])
+        .then(([students, projects, mentors]) => {
           if (isMounted) {
             globalStudentsCache = students;
             globalProjectsCache = projects;
+            globalMentorsCache = mentors;
             setStudentRegistry(students);
             setProjectRegistry(projects);
+            setMentorRegistry(mentors);
           }
         })
         .catch(err => console.error('Registry load error:', err));
+    } else {
+      getMentors().then(m => {
+        if (isMounted) {
+          globalMentorsCache = m;
+          setMentorRegistry(m);
+        }
+      }).catch(() => {});
     }
     return () => {
       isMounted = false;
@@ -502,13 +523,25 @@ function DailyFoodListContent() {
       }
 
       // 2. Instant institutional registry verification (<0.1ms)
+      const digits = code.replace(/\D/g, '');
       const student =
-        studentRegistry.find(s => s.id.toUpperCase() === code) ||
-        globalStudentsCache.find(s => s.id.toUpperCase() === code);
+        studentRegistry.find(s => 
+          s.id.toUpperCase() === code || 
+          s.id.toUpperCase() === `INT-${digits}` ||
+          (digits.length >= 4 && s.phone && s.phone.endsWith(digits))
+        ) ||
+        globalStudentsCache.find(s => 
+          s.id.toUpperCase() === code || 
+          s.id.toUpperCase() === `INT-${digits}` ||
+          (digits.length >= 4 && s.phone && s.phone.endsWith(digits))
+        );
 
-      const proj = projectRegistry.find(p => p.members.some(m => m.studentId.toUpperCase() === code));
-      const projectCode = proj?.code || 'INC-GENERAL';
-      const projectName = proj?.name || 'Incubation Member';
+      const isIntern = student?.id.startsWith('INT-') || student?.courseType === 'Intern';
+      const proj = projectRegistry.find(p => p.members.some(m => m.studentId.toUpperCase() === (student?.id || code)));
+      const projectCode = isIntern ? 'GEN-INTERN' : (student?.mentorCode || proj?.code || 'INC-GENERAL');
+      const projectName = isIntern
+        ? (student?.department ? `Startup: ${student.department}` : 'Startup Intern')
+        : (student?.mentorName ? `Mentor: ${student.mentorName}` : (proj?.name || 'Incubation Member'));
 
       // 3. Instant Optimistic UI Update (<5ms)
       const newEntry: FoodListEntry = {
@@ -516,6 +549,9 @@ function DailyFoodListContent() {
         studentName: student?.name || code,
         department: student?.department || '—',
         year: student?.year || 0,
+        category: isIntern ? 'Intern' : 'Student',
+        startupName: isIntern ? student?.department : undefined,
+        mentorName: student?.mentorName,
         projectCode,
         projectName,
         addedBy: 'Barcode Scanner Gun',
@@ -655,29 +691,50 @@ function DailyFoodListContent() {
 
 
   // Daily list actions
-  const searchStudent = () => {
-    const query = searchId.trim().toUpperCase();
-    const s = studentRegistry.find(st => st.id.toUpperCase() === query);
-    if (!s) {
+  const searchStudent = async () => {
+    const query = searchId.trim();
+    if (!query) return;
+    setIsSearchingStudent(true);
+    try {
+      const upper = query.toUpperCase();
+      const digits = query.replace(/\D/g, '');
+      let s = studentRegistry.find(st =>
+        st.id.toUpperCase() === upper ||
+        st.id.toUpperCase() === `INT-${digits}` ||
+        st.name.toUpperCase().includes(upper) ||
+        (digits.length >= 4 && st.phone && st.phone.endsWith(digits))
+      );
+
+      if (!s) {
+        s = (await getStudentById(query)) || undefined;
+      }
+
+      if (!s) {
+        setFoundStudent('not-found');
+        return;
+      }
+      setFoundStudent(s);
+      setSelectedMentor(s.mentorCode || '');
+    } catch {
       setFoundStudent('not-found');
-      return;
+    } finally {
+      setIsSearchingStudent(false);
     }
-    setFoundStudent(s);
-    const proj = projectRegistry.find(p => p.members.some(m => m.studentId === s.id));
-    setSelectedProject(proj?.code || projectRegistry[0]?.code || 'AGRI-01');
   };
 
   const handleAddStudent = async () => {
     if (!foundStudent || foundStudent === 'not-found') return;
     if (currentList?.entries.some(e => e.studentId === foundStudent.id)) {
-      showToast(`Student ${foundStudent.id} is already in the list for ${selectedDate}.`);
+      showToast(`${foundStudent.category || 'Member'} ${foundStudent.id} is already in the list for ${selectedDate}.`);
       setShowAddStudent(false);
       setFoundStudent(null);
       setSearchId('');
       return;
     }
 
-    const res = await addStudentToDailyList(selectedDate, foundStudent.id, selectedProject || 'AGRI-01');
+    const isIntern = foundStudent.category === 'Intern' || foundStudent.courseType === 'Intern' || foundStudent.id.startsWith('INT-');
+    const defaultCode = foundStudent.mentorId || foundStudent.mentorCode || undefined;
+    const res = await addStudentToDailyList(selectedDate, foundStudent.id, defaultCode);
     if (res.success) {
       showToast(res.message);
       setShowAddStudent(false);
@@ -699,19 +756,21 @@ function DailyFoodListContent() {
     }
   };
 
-  const bulkProjectMembers = bulkProject
-    ? (projectRegistry
-        .find(p => p.code === bulkProject)
-        ?.members.map(m => studentRegistry.find(s => s.id === m.studentId))
-        .filter(Boolean) as StudentRecord[] ?? [])
-    : [];
+  const bulkMentorMentees = useMemo(() => {
+    if (!bulkMentor) return [];
+    const mentor = mentorRegistry.find(m => m.code === bulkMentor);
+    if (!mentor) return [];
+    return studentRegistry.filter(
+      (s: StudentRecord) => s.mentorCode === bulkMentor || s.mentorName === mentor.name
+    );
+  }, [bulkMentor, mentorRegistry, studentRegistry]);
 
   const handleAddBulkStudents = async () => {
-    if (bulkSelected.length === 0 || !bulkProject) return;
-    const res = await addBulkStudentsToDailyList(selectedDate, bulkSelected, bulkProject);
+    if (bulkSelected.length === 0 || !bulkMentor) return;
+    const res = await addBulkByMentorToDailyList(selectedDate, bulkSelected, bulkMentor);
     showToast(res.message);
     setBulkSelected([]);
-    setBulkProject('');
+    setBulkMentor('');
     setShowBulkAdd(false);
     await loadData(selectedDate);
   };
@@ -933,13 +992,13 @@ function DailyFoodListContent() {
                 onClick={() => setShowBulkAdd(true)}
                 className="border border-indigo-300 text-indigo-700 text-sm px-3.5 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors font-medium cursor-pointer"
               >
-                + Add by Project
+                + Add by Mentor
               </button>
               <button
                 onClick={() => setShowAddStudent(true)}
                 className="bg-indigo-700 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-800 transition-colors font-medium shadow-xs cursor-pointer"
               >
-                + Add Student
+                + Add Member
               </button>
 
               <button
@@ -984,17 +1043,17 @@ function DailyFoodListContent() {
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   <span className="font-bold text-slate-900 text-sm">{currentList.entries.length}</span>
-                  <span className="font-medium text-slate-500">Students Approved</span>
+                  <span className="font-medium text-slate-500">Members Approved</span>
                 </div>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-indigo-700">{new Set(currentList.entries.map(e => e.department)).size}</span>
-                  <span className="text-slate-500">Departments</span>
+                  <span className="text-slate-500">Depts / Startups</span>
                 </div>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-sky-700">{new Set(currentList.entries.map(e => e.projectName || e.projectCode)).size}</span>
-                  <span className="text-slate-500">Active Projects</span>
+                  <span className="font-bold text-sky-700">{new Set(currentList.entries.map(e => e.mentorName || e.projectName || e.projectCode)).size}</span>
+                  <span className="text-slate-500">Mentors / Teams</span>
                 </div>
               </div>
 
@@ -1014,7 +1073,7 @@ function DailyFoodListContent() {
                   type="text"
                   value={foodListSearch}
                   onChange={e => setFoodListSearch(e.target.value)}
-                  placeholder="Search student roll no, name, department, or project..."
+                  placeholder="Search member roll no, intern code, name, dept/startup, or mentor..."
                   className="w-full pl-9 pr-8 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all font-medium text-slate-800 placeholder:text-slate-400"
                 />
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
@@ -1062,16 +1121,16 @@ function DailyFoodListContent() {
             ) : !currentList || currentList.entries.length === 0 ? (
               <div className="py-16 text-center">
                 <div className="text-3xl mb-3">🍽️</div>
-                <div className="font-medium text-slate-700">No students in food list for this date</div>
+                <div className="font-medium text-slate-700">No members in food list for this date</div>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  Scan student ID cards using a USB gun or webcam, or click &ldquo;+ Add Student&rdquo; above.
+                  Scan student ID cards / intern codes using a USB gun or webcam, or click &ldquo;+ Add Member&rdquo; above.
                 </p>
               </div>
             ) : filteredFoodListEntries.length === 0 ? (
               <div className="py-12 text-center text-slate-500">
                 <div className="text-2xl mb-2">🔍</div>
-                <div className="font-semibold text-slate-800">No students match &ldquo;{foodListSearch}&rdquo;</div>
-                <p className="text-xs text-slate-400 mt-1">Try searching by roll number, name, department, or project code.</p>
+                <div className="font-semibold text-slate-800">No members match &ldquo;{foodListSearch}&rdquo;</div>
+                <p className="text-xs text-slate-400 mt-1">Try searching by roll number, intern code, name, startup, or mentor.</p>
                 <button
                   type="button"
                   onClick={() => setFoodListSearch('')}
@@ -1088,53 +1147,72 @@ function DailyFoodListContent() {
                       <tr>
                         <th className="px-3 py-3 text-center w-14">S.No</th>
                         <th className="px-4 py-3">Roll No / ID</th>
-                        <th className="px-4 py-3">Student Name</th>
-                        <th className="px-4 py-3">Dept & Year</th>
-                        <th className="px-4 py-3">Incubation Project</th>
+                        <th className="px-4 py-3">Member Name</th>
+                        <th className="px-4 py-3">Type &amp; Dept / Startup</th>
+                        <th className="px-4 py-3">Mentor / Affiliation</th>
                         <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {paginatedFoodList.map((entry, idx) => (
-                        <tr
-                          key={idx}
-                          className={`transition-colors duration-500 ${
-                            highlightedStudentId === entry.studentId
-                              ? 'bg-emerald-100/90 ring-2 ring-emerald-400 font-semibold shadow-xs'
-                              : 'hover:bg-slate-50/70'
-                          }`}
-                        >
-                          <td className="px-3 py-3 text-center text-xs text-slate-500 font-medium">
-                            {foodListStartIndex + idx + 1}
-                          </td>
-                          <td className="px-4 py-3 font-mono font-bold text-indigo-700">
-                            {entry.studentId}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-slate-900">
-                            {entry.studentName}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">
-                            {entry.department} {entry.year ? `· Yr ${entry.year}` : ''}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                              {entry.projectName || entry.projectCode}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <Badge status="Eligible" />
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              onClick={() => handleRemoveEntry(entry.studentId)}
-                              className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                            >
-                              Remove
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {paginatedFoodList.map((entry, idx) => {
+                        const isIntern = entry.category === 'Intern' || entry.studentId.startsWith('INT-');
+                        return (
+                          <tr
+                            key={idx}
+                            className={`transition-colors duration-500 ${
+                              highlightedStudentId === entry.studentId
+                                ? 'bg-emerald-100/90 ring-2 ring-emerald-400 font-semibold shadow-xs'
+                                : 'hover:bg-slate-50/70'
+                            }`}
+                          >
+                            <td className="px-3 py-3 text-center text-xs text-slate-500 font-medium">
+                              {foodListStartIndex + idx + 1}
+                            </td>
+                            <td className="px-4 py-3 font-mono font-bold text-indigo-700">
+                              <div className="flex items-center gap-1.5">
+                                <span>{entry.studentId}</span>
+                                {isIntern && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                    INTERN
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 font-medium text-slate-900">
+                              {entry.studentName}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600 text-xs">
+                              {isIntern ? (
+                                <span className="text-amber-900 font-semibold flex items-center gap-1">
+                                  <span>💼</span>
+                                  <span>{entry.startupName || entry.department}</span>
+                                </span>
+                              ) : (
+                                <span>
+                                  {entry.department} {entry.year ? `· Yr ${entry.year}` : ''}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                {entry.mentorName ? `Mentor: ${entry.mentorName}` : (entry.projectName || entry.projectCode || '—')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge status="Eligible" />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => handleRemoveEntry(entry.studentId)}
+                                className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1632,59 +1710,87 @@ function DailyFoodListContent() {
       )}
 
 
-      {/* 3. Add Single Student Modal */}
+      {/* 3. Add Single Member Modal (Streamlined 1-step, no project barrier) */}
       {showAddStudent && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-            <h3 className="font-semibold text-slate-800 text-lg">Add Student to Daily Food List</h3>
+            <h3 className="font-semibold text-slate-800 text-lg">Add Member to Daily Food List</h3>
             <p className="text-xs text-slate-500">
-              Enter college student roll ID (e.g. SEC24CS110 or 23CS101) to verify eligibility.
+              Enter college student roll ID (e.g. 23CS101) or startup intern phone/code (e.g. INT-3210 or 3210).
             </p>
             <div className="flex gap-2">
               <input
                 value={searchId}
                 onChange={e => setSearchId(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && searchStudent()}
-                placeholder="Student Roll No / ID..."
-                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase"
+                placeholder="Roll No, 4-digit Intern Code, or Name..."
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 autoFocus
               />
               <button
                 onClick={searchStudent}
-                className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                disabled={isSearchingStudent}
+                className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5"
               >
-                Search
+                {isSearchingStudent ? (
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <span>Search</span>
+                )}
               </button>
             </div>
 
             {foundStudent === 'not-found' && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-                Student ID not found in system registry. Please register student first.
+                Member ID or code not found in institutional registry. Please register student / intern first under Members.
               </div>
             )}
 
-            {foundStudent && foundStudent !== 'not-found' && (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2 text-xs">
-                <div className="font-medium text-slate-800 text-sm">{foundStudent.name}</div>
-                <div className="text-slate-500 font-mono">
-                  ID: {foundStudent.id} | {foundStudent.department} Yr {foundStudent.year}
+            {foundStudent && foundStudent !== 'not-found' && (() => {
+              const isIntern = foundStudent.category === 'Intern' || foundStudent.courseType === 'Intern' || foundStudent.id.startsWith('INT-');
+              return (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold text-slate-900 text-sm">{foundStudent.name}</div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isIntern
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                      }`}
+                    >
+                      {isIntern ? '💼 STARTUP INTERN' : '🎓 STUDENT'}
+                    </span>
+                  </div>
+
+                  <div className="text-slate-600 font-mono text-xs">
+                    ID: <span className="font-bold text-indigo-700">{foundStudent.id}</span>
+                    {isIntern ? (
+                      <span className="ml-2 text-slate-500">
+                        | Startup: <strong className="text-slate-800">{foundStudent.startupName || foundStudent.department}</strong>
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-slate-500">
+                        | {foundStudent.department} · Yr {foundStudent.year}
+                      </span>
+                    )}
+                  </div>
+
+                  {foundStudent.phone && (
+                    <div className="text-slate-500 text-[11px]">
+                      Mobile: {foundStudent.phone}
+                    </div>
+                  )}
+
+                  {foundStudent.mentorName && (
+                    <div className="text-slate-600 text-xs bg-white p-2 rounded-lg border border-slate-200">
+                      <span className="font-medium text-slate-500">Assigned Mentor: </span>
+                      <strong className="text-slate-800">{foundStudent.mentorName}</strong>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="text-slate-600 block mb-1 font-semibold">Assign Project:</label>
-                  <select
-                    value={selectedProject}
-                    onChange={e => setSelectedProject(e.target.value)}
-                    className="w-full border border-slate-300 rounded px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    {projectRegistry.map(p => (
-                      <option key={p.code} value={p.code}>
-                        {p.code} — {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex justify-end gap-2.5 pt-2">
               <button
@@ -1693,7 +1799,7 @@ function DailyFoodListContent() {
                   setFoundStudent(null);
                   setSearchId('');
                 }}
-                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
               >
                 Cancel
               </button>
@@ -1702,73 +1808,82 @@ function DailyFoodListContent() {
                 disabled={!foundStudent || foundStudent === 'not-found'}
                 className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 disabled:opacity-40 text-white rounded-lg font-medium transition-colors cursor-pointer"
               >
-                Confirm Add
+                Confirm Add to List
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 4. Bulk Add by Project Modal */}
+      {/* 4. Bulk Add by Mentor Modal */}
       {showBulkAdd && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
             <div className="p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800 text-lg">Add All Project Members</h3>
+              <h3 className="font-semibold text-slate-800 text-lg">Add Mentees by Mentor</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Select an incubation project to batch-add all members.
+                Select a mentor to quickly batch-approve all their assigned students for {selectedDate}.
               </p>
             </div>
             <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
               <div>
                 <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Select Incubation Project:
+                  Select Faculty / Industry Mentor:
                 </label>
                 <select
-                  value={bulkProject}
+                  value={bulkMentor}
                   onChange={e => {
-                    setBulkProject(e.target.value);
-                    const members =
-                      projectRegistry.find(p => p.code === e.target.value)?.members ?? [];
-                    setBulkSelected(members.map(m => m.studentId));
+                    const code = e.target.value;
+                    setBulkMentor(code);
+                    const mentor = mentorRegistry.find(m => m.code === code);
+                    const mentees = studentRegistry.filter(
+                      (s: StudentRecord) => s.mentorCode === code || s.mentorName === mentor?.name
+                    );
+                    setBulkSelected(mentees.map(m => m.id));
                   }}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                 >
-                  <option value="">-- Choose Project --</option>
-                  {projectRegistry.map(p => (
-                    <option key={p.code} value={p.code}>
-                      {p.code} — {p.name} ({p.members.length} members)
+                  <option value="">-- Choose Mentor --</option>
+                  {mentorRegistry.map((m: MentorRecord) => (
+                    <option key={m.code} value={m.code}>
+                      {m.name} ({m.department || 'Incubation'}) — {m.memberCount || 0} Mentees
                     </option>
                   ))}
                 </select>
               </div>
 
-              {bulkProject && (
+              {mentorRegistry.length === 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                  ℹ️ No mentors registered yet. You can add mentors under the <strong>Students &amp; Members &gt; Mentors</strong> tab, or add students individually.
+                </div>
+              )}
+
+              {bulkMentor && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-slate-700">Select Members:</span>
+                    <span className="text-xs font-semibold text-slate-700">Select Mentees to Approve:</span>
                     <button
                       onClick={() =>
                         setBulkSelected(
-                          bulkSelected.length === bulkProjectMembers.length
+                          bulkSelected.length === bulkMentorMentees.length
                             ? []
-                            : bulkProjectMembers.map(s => s.id)
+                            : bulkMentorMentees.map((s: StudentRecord) => s.id)
                         )
                       }
                       className="text-xs text-indigo-600 hover:underline cursor-pointer"
                     >
-                      {bulkSelected.length === bulkProjectMembers.length
+                      {bulkSelected.length === bulkMentorMentees.length
                         ? 'Deselect All'
                         : 'Select All'}
                     </button>
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-2.5">
-                    {bulkProjectMembers.length === 0 ? (
+                    {bulkMentorMentees.length === 0 ? (
                       <p className="text-xs text-slate-400 py-3 text-center">
-                        No registered members in this project.
+                        No mentees assigned under this mentor yet.
                       </p>
                     ) : (
-                      bulkProjectMembers.map(s => {
+                      bulkMentorMentees.map((s: StudentRecord) => {
                         const alreadyIn = currentList?.entries.some(e => e.studentId === s.id);
                         return (
                           <label
@@ -1804,19 +1919,19 @@ function DailyFoodListContent() {
               <button
                 onClick={() => {
                   setShowBulkAdd(false);
-                  setBulkProject('');
+                  setBulkMentor('');
                   setBulkSelected([]);
                 }}
-                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAddBulkStudents}
-                disabled={!bulkProject || bulkSelected.length === 0}
+                disabled={!bulkMentor || bulkSelected.length === 0}
                 className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 disabled:opacity-40 text-white rounded-lg font-medium transition-colors cursor-pointer"
               >
-                Add {bulkSelected.length} Student{bulkSelected.length !== 1 ? 's' : ''}
+                Add {bulkSelected.length} Member{bulkSelected.length !== 1 ? 's' : ''}
               </button>
             </div>
           </div>

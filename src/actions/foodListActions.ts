@@ -4,6 +4,7 @@ import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { revalidatePath } from 'next/cache';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
+import { getStudentById } from './studentActions';
 import {
   getTodayISTDateString,
   getNextISTDateString,
@@ -15,10 +16,14 @@ import {
 export interface FoodListEntry {
   studentId: string;
   studentName: string;
+  category?: 'Student' | 'Intern';
   department: string;
+  startupName?: string;
   year: number;
-  projectCode: string;
-  projectName: string;
+  mentorId?: string;
+  mentorName?: string;
+  projectCode: string; // Compatibility alias
+  projectName: string; // Compatibility alias
   addedBy: string;
   status: string;
 }
@@ -44,22 +49,30 @@ export async function getDailyFoodList(dateInput?: string): Promise<FoodListDeta
         where: { date },
         include: {
           student: true,
-          project: true,
+          mentor: true,
         },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
 
-    const entries: FoodListEntry[] = eligibilities.map((e: any) => ({
-      studentId: e.studentId,
-      studentName: e.student?.name || e.studentId,
-      department: normalizeDepartmentName(e.student?.department),
-      year: e.student?.year || 0,
-      projectCode: e.projectCode,
-      projectName: e.project?.name || e.projectCode,
-      addedBy: e.addedBy || 'Staff',
-      status: e.status || 'Eligible',
-    }));
+    const entries: FoodListEntry[] = eligibilities.map((e: any) => {
+      const isIntern = e.student?.category === 'Intern' || e.student?.courseType === 'Intern' || e.studentId.startsWith('INT-');
+      const mentorName = e.mentor?.name || 'Unassigned';
+      return {
+        studentId: e.studentId,
+        studentName: e.student?.name || e.studentId,
+        category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
+        department: isIntern ? (e.student?.startupName || e.student?.department || 'Startup Intern') : normalizeDepartmentName(e.student?.department),
+        startupName: isIntern ? (e.student?.startupName || e.student?.department) : undefined,
+        year: e.student?.year || 0,
+        mentorId: e.mentorId || undefined,
+        mentorName,
+        projectCode: e.mentorId || 'UNASSIGNED',
+        projectName: mentorName,
+        addedBy: e.addedBy || 'Staff',
+        status: e.status || 'Eligible',
+      };
+    });
 
     return {
       date,
@@ -128,6 +141,12 @@ export async function getLetterMealSessionCounts(dateInput?: string): Promise<Le
   }
 }
 
+function safeRevalidate(path: string) {
+  try {
+    revalidatePath(path);
+  } catch {}
+}
+
 export async function scanStudentIntoDailyFoodList(
   studentIdInput: string,
   targetDate?: string,
@@ -141,37 +160,31 @@ export async function scanStudentIntoDailyFoodList(
   project?: string;
   entry?: FoodListEntry;
 }> {
-  const studentId = (studentIdInput || '').trim().toUpperCase();
+  const query = (studentIdInput || '').trim();
   const date = targetDate || getTodayISTDateString();
 
-  if (!studentId) {
-    return { success: false, message: 'Student ID cannot be empty.' };
+  if (!query) {
+    return { success: false, message: 'Member ID or 4-digit code cannot be empty.' };
   }
 
   try {
-    // 1. Ultra-fast parallelized fetch of student, existing eligibility, and project membership in 1 network roundtrip
-    const [student, existing, pm] = await Promise.all([
-      prisma.student.findUnique({
-        where: { id: studentId },
-      }),
-      prisma.dailyFoodEligibility.findUnique({
-        where: {
-          date_studentId: {
-            date,
-            studentId,
-          },
-        },
-        include: { project: true },
-      }),
-      prisma.projectMember.findFirst({
-        where: { studentId },
-        include: { project: true },
-      }),
-    ]);
-
+    const student = await getStudentById(query);
     if (!student) {
-      return { success: false, notFound: true, message: `Student ID "${studentId}" not found in institutional registry.` };
+      return { success: false, notFound: true, message: `Member ID / 4-digit code "${query}" not found in institutional registry.` };
     }
+
+    const studentId = student.id;
+
+    // Check existing eligibility
+    const existing = await prisma.dailyFoodEligibility.findUnique({
+      where: {
+        date_studentId: {
+          date,
+          studentId,
+        },
+      },
+      include: { mentor: true },
+    });
 
     if (existing) {
       return {
@@ -183,24 +196,15 @@ export async function scanStudentIntoDailyFoodList(
           department: student.department,
           year: student.year,
         },
-        project: existing.project?.name || existing.projectCode,
+        project: existing.mentor?.name || student.mentorName || 'General',
         message: `${student.name} (${studentId}) is already on the food list for ${date}.`,
       };
     }
 
-    // 2. Determine assigned project
-    let projectCode = '';
-    let projectName = '';
-    if (pm && pm.project) {
-      projectCode = pm.projectCode;
-      projectName = pm.project.name;
-    } else {
-      const firstProject = await prisma.project.findFirst({ where: { status: 'Active' } });
-      projectCode = firstProject ? firstProject.code : 'INC-GENERAL';
-      projectName = firstProject ? firstProject.name : 'Incubation Team';
-    }
+    const mentorId = student.mentorId || null;
+    const mentorName = student.mentorName || 'Unassigned';
 
-    // 3. Ensure daily food list header exists
+    // Ensure daily food list header exists
     const createdById = await ensureDefaultStaffUser();
     await prisma.dailyFoodList.upsert({
       where: { date },
@@ -212,12 +216,12 @@ export async function scanStudentIntoDailyFoodList(
       },
     });
 
-    // 4. Create food eligibility entry (STRICTLY NO TOKEN ISSUED)
+    // Create food eligibility entry
     await prisma.dailyFoodEligibility.create({
       data: {
         date,
         studentId,
-        projectCode,
+        mentorId,
         addedBy,
         status: 'Eligible',
       },
@@ -226,17 +230,21 @@ export async function scanStudentIntoDailyFoodList(
     appCache.invalidateTags(['foodlist', 'dashboard']);
     appCache.invalidateKey(`dash_bundle_${date}`);
     appCache.invalidateKey(`foodlist_${date}`);
-    revalidatePath('/daily-food-list');
-    revalidatePath('/dashboard');
-    revalidatePath('/scan-token');
+    safeRevalidate('/daily-food-list');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/scan-token');
 
     const createdEntry: FoodListEntry = {
       studentId: student.id,
       studentName: student.name,
-      department: normalizeDepartmentName(student.department),
+      category: student.category,
+      department: student.department,
+      startupName: student.startupName,
       year: student.year,
-      projectCode,
-      projectName,
+      mentorId: mentorId || undefined,
+      mentorName,
+      projectCode: mentorId || 'UNASSIGNED',
+      projectName: mentorName,
       addedBy,
       status: 'Eligible',
     };
@@ -250,34 +258,31 @@ export async function scanStudentIntoDailyFoodList(
         department: student.department,
         year: student.year,
       },
-      project: projectName,
+      project: mentorName,
       entry: createdEntry,
     };
   } catch (error) {
-    console.error('Error scanning student into daily list:', error);
-    return { success: false, message: 'Server error while adding student to food list.' };
+    console.error('Error adding attendee to daily list:', error);
+    return { success: false, message: 'Server error while adding attendee to food list.' };
   }
 }
 
 export async function addStudentToDailyList(
   date: string,
   studentIdInput: string,
-  projectCodeInput: string,
+  mentorIdInput?: string,
   addedBy: string = 'Staff'
 ): Promise<{ success: boolean; message: string }> {
-  const studentId = studentIdInput.trim().toUpperCase();
-  const projectCode = projectCodeInput.trim().toUpperCase();
+  const query = (studentIdInput || '').trim();
 
   try {
-    // 1. Verify student exists
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-    });
+    const student = await getStudentById(query);
     if (!student) {
-      return { success: false, message: `Student ID "${studentId}" not found in institutional registry.` };
+      return { success: false, message: `Member ID / 4-digit code "${query}" not found in institutional registry.` };
     }
+    const studentId = student.id;
 
-    // 2. Ensure daily food list header exists with valid staffUser FK
+    // Ensure daily food list header exists
     const createdById = await ensureDefaultStaffUser();
     await prisma.dailyFoodList.upsert({
       where: { date },
@@ -289,7 +294,7 @@ export async function addStudentToDailyList(
       },
     });
 
-    // 3. Check if already added
+    // Check if already added
     const existing = await prisma.dailyFoodEligibility.findUnique({
       where: {
         date_studentId: {
@@ -300,15 +305,23 @@ export async function addStudentToDailyList(
     });
 
     if (existing) {
-      return { success: false, message: `Student ${student.name} (${studentId}) is already on the food list for ${date}.` };
+      return { success: false, message: `${student.name} (${studentId}) is already on the food list for ${date}.` };
     }
 
-    // 4. Create eligibility record
+    let effectiveMentorId: string | null = null;
+    if (mentorIdInput && mentorIdInput !== 'UNASSIGNED' && mentorIdInput !== 'GEN-INTERN' && mentorIdInput !== 'INC-GENERAL') {
+      const mentorRecord = await prisma.mentor.findUnique({ where: { id: mentorIdInput.trim() } });
+      if (mentorRecord) effectiveMentorId = mentorRecord.id;
+    }
+    if (!effectiveMentorId) {
+      effectiveMentorId = student.mentorId || null;
+    }
+
     await prisma.dailyFoodEligibility.create({
       data: {
         date,
         studentId,
-        projectCode,
+        mentorId: effectiveMentorId,
         addedBy,
         status: 'Eligible',
       },
@@ -317,27 +330,25 @@ export async function addStudentToDailyList(
     appCache.invalidateTags(['foodlist', 'dashboard']);
     appCache.invalidateKey(`dash_bundle_${date}`);
     appCache.invalidateKey(`foodlist_${date}`);
-    revalidatePath('/daily-food-list');
-    revalidatePath('/dashboard');
-    revalidatePath('/scan-token');
-    return { success: true, message: `Student ${student.name} added to food list.` };
+    safeRevalidate('/daily-food-list');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/scan-token');
+    return { success: true, message: `✓ Added ${student.name} (${studentId}) to tonight's food list.` };
   } catch (error) {
-    console.error('Error adding student to daily list:', error);
-    return { success: false, message: 'Server error while adding student to food list.' };
+    console.error('Error adding member to daily list:', error);
+    return { success: false, message: 'Server error while adding member to food list.' };
   }
 }
 
 export async function addBulkStudentsToDailyList(
   date: string,
   studentIds: string[],
-  projectCodeInput: string,
+  mentorIdInput?: string,
   addedBy: string = 'Staff'
 ): Promise<{ success: boolean; message: string; count: number }> {
-  const projectCode = projectCodeInput.trim().toUpperCase();
   let addedCount = 0;
 
   try {
-    // Ensure header with valid staffUser FK
     const createdById = await ensureDefaultStaffUser();
     await prisma.dailyFoodList.upsert({
       where: { date },
@@ -346,16 +357,28 @@ export async function addBulkStudentsToDailyList(
     });
 
     for (const rawId of studentIds) {
-      const studentId = rawId.trim().toUpperCase();
+      const student = await getStudentById(rawId);
+      if (!student) continue;
+
+      const studentId = student.id;
       const existing = await prisma.dailyFoodEligibility.findUnique({
         where: { date_studentId: { date, studentId } },
       });
       if (!existing) {
+        let effectiveMentorId: string | null = null;
+        if (mentorIdInput && mentorIdInput !== 'UNASSIGNED' && mentorIdInput !== 'GEN-INTERN' && mentorIdInput !== 'INC-GENERAL') {
+          const mentorRecord = await prisma.mentor.findUnique({ where: { id: mentorIdInput.trim() } });
+          if (mentorRecord) effectiveMentorId = mentorRecord.id;
+        }
+        if (!effectiveMentorId) {
+          effectiveMentorId = student.mentorId || null;
+        }
+
         await prisma.dailyFoodEligibility.create({
           data: {
             date,
             studentId,
-            projectCode,
+            mentorId: effectiveMentorId,
             addedBy,
             status: 'Eligible',
           },
@@ -367,18 +390,27 @@ export async function addBulkStudentsToDailyList(
     appCache.invalidateTags(['foodlist', 'dashboard']);
     appCache.invalidateKey(`dash_bundle_${date}`);
     appCache.invalidateKey(`foodlist_${date}`);
-    revalidatePath('/daily-food-list');
-    revalidatePath('/dashboard');
-    revalidatePath('/scan-token');
+    safeRevalidate('/daily-food-list');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/scan-token');
     return {
       success: true,
-      message: `${addedCount} student(s) added to the food list.`,
+      message: `✓ Added ${addedCount} member(s) to the food list.`,
       count: addedCount,
     };
   } catch (error) {
-    console.error('Error bulk adding students:', error);
+    console.error('Error bulk adding attendees:', error);
     return { success: false, message: 'Server error during bulk addition.', count: 0 };
   }
+}
+
+export async function addBulkByMentorToDailyList(
+  date: string,
+  studentIds: string[],
+  mentorIdInput?: string,
+  addedBy: string = 'Staff'
+): Promise<{ success: boolean; message: string; count: number }> {
+  return addBulkStudentsToDailyList(date, studentIds, mentorIdInput, addedBy);
 }
 
 export async function removeStudentFromDailyList(
@@ -390,7 +422,6 @@ export async function removeStudentFromDailyList(
     const student = await prisma.student.findUnique({ where: { id: studentId } });
     const studentName = student?.name || studentId;
 
-    // Check if tokens were ALREADY issued for this student for this date/cycle
     const nextDate = getNextISTDateString(date);
     const [tokensOnDate, nextDayTokens] = await Promise.all([
       prisma.foodToken.findMany({
@@ -427,9 +458,9 @@ export async function removeStudentFromDailyList(
     appCache.invalidateTags(['foodlist', 'dashboard']);
     appCache.invalidateKey(`dash_bundle_${date}`);
     appCache.invalidateKey(`foodlist_${date}`);
-    revalidatePath('/daily-food-list');
-    revalidatePath('/dashboard');
-    revalidatePath('/scan-token');
+    safeRevalidate('/daily-food-list');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/scan-token');
 
     if (res.count === 0) {
       return { success: true, message: 'Student was already removed from food list.' };
@@ -467,9 +498,9 @@ export async function finalizeFoodList(
     appCache.invalidateTags(['foodlist', 'dashboard']);
     appCache.invalidateKey(`dash_bundle_${date}`);
     appCache.invalidateKey(`foodlist_${date}`);
-    revalidatePath('/daily-food-list');
-    revalidatePath('/dashboard');
-    revalidatePath('/scan-token');
+    safeRevalidate('/daily-food-list');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/scan-token');
     return { success: true, message: `Food eligibility list for ${date} finalized successfully.` };
   } catch (error) {
     console.error('Error finalizing food list:', error);
@@ -478,28 +509,24 @@ export async function finalizeFoodList(
 }
 
 export interface DatewiseLogSummary {
-  date: string; // The Night-Stay date (e.g. 2026-09-29)
-  nextDate: string; // The morning/afternoon date (e.g. 2026-09-30)
+  date: string;
+  nextDate: string;
   status: 'Draft' | 'Finalized' | 'No Stay';
   cycleStatus: 'Upcoming' | 'In Progress' | 'Completed' | 'No Stay Cohort';
   finalizedBy?: string | null;
   finalizedAt?: string | null;
-  totalEligible: number; // Students registered for overnight stay on Date D
-
-  // 3-Meal Night-Stay Cycle Tokens
-  dinnerCount: number; // Meal 1: Dinner on Date D
-  breakfastCount: number; // Meal 2: Breakfast on Date D+1
-  lunchCount: number; // Meal 3: Lunch on Date D+1
-  totalMealsServed: number; // Dinner + Breakfast + Lunch for this cohort
-  totalTokensIssued: number; // Backward-compatible alias for totalMealsServed
-  maxPossibleMeals: number; // totalEligible * 3
-  turnoutPercentage: number; // (totalMealsServed / maxPossibleMeals) * 100 (capped at 100%)
-
-  // Kitchen Calendar Day Serving (Alternative perspective for catering)
-  kitchenBreakfastCount: number; // Breakfast plates served on calendar Date D
-  kitchenLunchCount: number; // Lunch plates served on calendar Date D
-  kitchenDinnerCount: number; // Dinner plates served on calendar Date D
-  kitchenTotalPlates: number; // Sum of B + L + D plates served on calendar Date D
+  totalEligible: number;
+  dinnerCount: number;
+  breakfastCount: number;
+  lunchCount: number;
+  totalMealsServed: number;
+  totalTokensIssued: number;
+  maxPossibleMeals: number;
+  turnoutPercentage: number;
+  kitchenBreakfastCount: number;
+  kitchenLunchCount: number;
+  kitchenDinnerCount: number;
+  kitchenTotalPlates: number;
 }
 
 export interface StudentMealAudit {
@@ -546,14 +573,11 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
       const todayStr = getTodayISTDateString();
       dateSet.add(todayStr);
 
-      // Continuous Calendar Date Range Generation:
-      // Find the earliest recorded date (or at least 7 days before today)
       let earliestDate = todayStr;
       for (const d of dateSet) {
         if (d && d < earliestDate) earliestDate = d;
       }
 
-      // Fill in all continuous calendar dates from earliestDate up to todayStr
       let cursor = earliestDate;
       let iterations = 0;
       while (cursor <= todayStr && iterations < 90) {
@@ -568,22 +592,17 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
         const nextDate = getNextISTDateString(date);
         const list = (allLists || []).find((l: any) => l.date === date);
 
-        // Eligible students who stayed overnight on Date D
         const dayEligibilities = (allEligibilities || []).filter((e: any) => e.date === date);
         const eligibleStudentIds = new Set(dayEligibilities.map((e: any) => e.studentId));
 
-        // 3-Meal Night-Stay Cycle Tokens:
-        // Meal 1: Dinner on Date D (night of stay) - strictly matched against eligible cohort
         const dinnerTokens = (allTokens || []).filter((t: any) =>
           t.date === date && (t.session || '').toUpperCase().includes('DINNER') && eligibleStudentIds.has(t.studentId)
         );
 
-        // Meal 2: Breakfast on Date D+1 (morning after stay) - strictly matched against eligible cohort
         const breakfastTokens = (allTokens || []).filter((t: any) =>
           t.date === nextDate && (t.session || '').toUpperCase().includes('BREAKFAST') && eligibleStudentIds.has(t.studentId)
         );
 
-        // Meal 3: Lunch on Date D+1 (afternoon after stay) - strictly matched against eligible cohort
         const lunchTokens = (allTokens || []).filter((t: any) =>
           t.date === nextDate && (t.session || '').toUpperCase().includes('LUNCH') && eligibleStudentIds.has(t.studentId)
         );
@@ -599,7 +618,6 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
           ? Math.min(100, Math.round((totalMealsServed / maxPossibleMeals) * 100))
           : 0;
 
-        // Kitchen Service on Calendar Date D
         const kitchenBreakfastCount = (allTokens || []).filter((t: any) =>
           t.date === date && (t.session || '').toUpperCase().includes('BREAKFAST')
         ).length;
@@ -611,7 +629,6 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
         ).length;
         const kitchenTotalPlates = kitchenBreakfastCount + kitchenLunchCount + kitchenDinnerCount;
 
-        // Cycle Status
         let cycleStatus: 'Upcoming' | 'In Progress' | 'Completed' | 'No Stay Cohort' = 'Upcoming';
         if (totalEligible === 0 && date !== todayStr) {
           cycleStatus = 'No Stay Cohort';
@@ -655,7 +672,6 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
         };
       });
 
-      // Sort descending by night-stay date
       return logs.sort((a, b) => b.date.localeCompare(a.date));
     } catch (error) {
       console.error('Error fetching datewise food logs:', error);
@@ -674,7 +690,7 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
         prisma.dailyFoodList.findUnique({ where: { date } }),
         prisma.dailyFoodEligibility.findMany({
           where: { date },
-          include: { student: true, project: true },
+          include: { student: true, mentor: true },
           orderBy: { studentId: 'asc' },
         }),
         prisma.foodToken.findMany({
@@ -682,14 +698,14 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
             date,
             session: { in: ['DINNER', 'Dinner', 'dinner'] },
           },
-          include: { student: true, project: true },
+          include: { student: true, mentor: true },
         }),
         prisma.foodToken.findMany({
           where: {
-            date: nextDate,
+            date,
             session: { in: ['BREAKFAST', 'Breakfast', 'breakfast', 'LUNCH', 'Lunch', 'lunch'] },
           },
-          include: { student: true, project: true },
+          include: { student: true, mentor: true },
         }),
       ]);
 
@@ -723,7 +739,7 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
           studentName: e.student?.name || e.studentId,
           department: e.student?.department || '—',
           year: e.student?.year || 1,
-          projectCode: e.projectCode || '—',
+          projectCode: e.mentor?.name || 'Unassigned',
           dinner: {
             issued: Boolean(dToken),
             tokenNumber: dToken?.tokenNumber,
@@ -746,7 +762,6 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
         };
       });
 
-      // Include any students who were issued tokens for this cycle even if unlinked from draft list
       const extraTokenMap = new Map<string, any>();
       [...dinnerTokens, ...nextDayTokens].forEach((t: any) => {
         if (!eligibilityStudentIds.has(t.studentId) && !extraTokenMap.has(t.studentId)) {
@@ -769,7 +784,7 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
           studentName: sampleTok.student?.name || stId,
           department: sampleTok.student?.department || '—',
           year: sampleTok.student?.year || 1,
-          projectCode: sampleTok.projectCode || sampleTok.project?.code || '—',
+          projectCode: sampleTok.mentor?.name || 'Unassigned',
           dinner: {
             issued: Boolean(dToken),
             tokenNumber: dToken?.tokenNumber,
@@ -839,4 +854,3 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
     }
   });
 }
-
