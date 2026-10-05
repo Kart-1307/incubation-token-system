@@ -39,58 +39,60 @@ export interface FoodListDetails {
 export async function getDailyFoodList(dateInput?: string): Promise<FoodListDetails> {
   const date = dateInput || getTodayISTDateString();
 
-  try {
-    const [list, eligibilities] = await Promise.all([
-      prisma.dailyFoodList.findUnique({
-        where: { date },
-        select: { status: true, finalizedBy: true, finalizedAt: true },
-      }),
-      prisma.dailyFoodEligibility.findMany({
-        where: { date },
-        include: {
-          student: true,
-          mentor: true,
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-    ]);
+  return appCache.get(`foodlist_${date}`, 60, async () => {
+    try {
+      const [list, eligibilities] = await Promise.all([
+        prisma.dailyFoodList.findUnique({
+          where: { date },
+          select: { status: true, finalizedBy: true, finalizedAt: true },
+        }),
+        prisma.dailyFoodEligibility.findMany({
+          where: { date },
+          include: {
+            student: true,
+            mentor: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
 
-    const entries: FoodListEntry[] = eligibilities.map((e: any) => {
-      const isIntern = e.student?.category === 'Intern' || e.student?.courseType === 'Intern' || e.studentId.startsWith('INT-');
-      const mentorName = e.mentor?.name || 'Unassigned';
+      const entries: FoodListEntry[] = eligibilities.map((e: any) => {
+        const isIntern = e.student?.category === 'Intern' || e.student?.courseType === 'Intern' || e.studentId.startsWith('INT-');
+        const mentorName = e.mentor?.name || 'Unassigned';
+        return {
+          studentId: e.studentId,
+          studentName: e.student?.name || e.studentId,
+          category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
+          department: isIntern ? (e.student?.startupName || e.student?.department || 'Startup Intern') : normalizeDepartmentName(e.student?.department),
+          startupName: isIntern ? (e.student?.startupName || e.student?.department) : undefined,
+          year: e.student?.year || 0,
+          mentorId: e.mentorId || undefined,
+          mentorName,
+          projectCode: e.mentorId || 'UNASSIGNED',
+          projectName: mentorName,
+          addedBy: e.addedBy || 'Staff',
+          status: e.status || 'Eligible',
+        };
+      });
+
       return {
-        studentId: e.studentId,
-        studentName: e.student?.name || e.studentId,
-        category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
-        department: isIntern ? (e.student?.startupName || e.student?.department || 'Startup Intern') : normalizeDepartmentName(e.student?.department),
-        startupName: isIntern ? (e.student?.startupName || e.student?.department) : undefined,
-        year: e.student?.year || 0,
-        mentorId: e.mentorId || undefined,
-        mentorName,
-        projectCode: e.mentorId || 'UNASSIGNED',
-        projectName: mentorName,
-        addedBy: e.addedBy || 'Staff',
-        status: e.status || 'Eligible',
+        date,
+        status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+        finalizedBy: list?.finalizedBy || null,
+        finalizedAt: list?.finalizedAt instanceof Date
+          ? list.finalizedAt.toLocaleString('en-IN')
+          : (list?.finalizedAt ? String(list.finalizedAt) : null),
+        entries,
       };
-    });
-
-    return {
-      date,
-      status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
-      finalizedBy: list?.finalizedBy || null,
-      finalizedAt: list?.finalizedAt instanceof Date
-        ? list.finalizedAt.toLocaleString('en-IN')
-        : (list?.finalizedAt ? String(list.finalizedAt) : null),
-      entries,
-    };
-  } catch (error) {
-    console.error('Error fetching daily food list:', error);
-    return {
-      date,
-      status: 'Draft',
-      entries: [],
-    };
-  }
+    } catch (error) {
+      console.error('Error fetching daily food list:', error);
+      return {
+        date,
+        status: 'Draft',
+        entries: [],
+      };
+    }
+  }, ['foodlist']);
 }
 
 export interface LetterMealCounts {

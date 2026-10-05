@@ -748,11 +748,6 @@ function MobileScanContent() {
                   ID: <strong className="text-white">{resultData.studentId}</strong>
                   {resultData.department ? ` · ${resultData.department}` : ''}
                 </div>
-                {resultData.project && (
-                  <div className="mt-1 text-[11px] text-slate-300 font-medium">
-                    Project: <span className="text-sky-300 font-semibold">{resultData.project}</span>
-                  </div>
-                )}
               </div>
 
               <div className="flex items-center justify-between gap-2 pt-0.5">

@@ -52,9 +52,12 @@ export interface ProjectRecord {
 }
 
 export async function getStudents(): Promise<StudentRecord[]> {
-  return appCache.get('students_all', 30, async () => {
+  return appCache.get('students_all', 120, async () => {
     try {
       const list = await prisma.student.findMany({
+        where: {
+          status: { not: 'Deleted' },
+        },
         include: { mentor: true },
         orderBy: { name: 'asc' },
       });
@@ -145,7 +148,7 @@ export async function getStudentById(idInput: string): Promise<StudentRecord | n
       });
     }
 
-    if (!student) return null;
+    if (!student || student.status === 'Deleted') return null;
 
     const isIntern = student.category === 'Intern' || student.courseType === 'Intern' || student.id.startsWith('INT-');
     const mentorName = student.mentor?.name || 'Unassigned';
@@ -201,6 +204,52 @@ export async function createStudent(data: {
     });
 
     if (existing) {
+      if (existing.status === 'Deleted') {
+        const canonicalDept = normalizeDepartmentName(data.department);
+        const rawMentorId = data.mentorId || data.mentorCode;
+        const mentorId = rawMentorId && rawMentorId !== 'UNASSIGNED' ? rawMentorId.trim() : null;
+
+        const updated = await prisma.student.update({
+          where: { id },
+          data: {
+            name,
+            category: 'Student',
+            courseType,
+            department: canonicalDept,
+            year: Number(data.year) || 1,
+            email,
+            phone: data.phone || null,
+            status: data.status || 'Active',
+            mentorId,
+          },
+          include: { mentor: true },
+        });
+
+        appCache.invalidateTags(['students', 'dashboard', 'mentors']);
+        safeRevalidate('/students');
+        safeRevalidate('/dashboard');
+
+        return {
+          success: true,
+          message: `Student ${name} (${id}) registered successfully.`,
+          student: {
+            id: updated.id,
+            name: updated.name,
+            category: 'Student',
+            courseType: updated.courseType,
+            department: updated.department,
+            year: updated.year,
+            email: updated.email,
+            phone: updated.phone,
+            status: 'Active',
+            mentorId: updated.mentorId || undefined,
+            mentorName: updated.mentor?.name || 'Unassigned',
+            mentorDept: updated.mentor?.department,
+            mentorCode: updated.mentorId || undefined,
+            projects: updated.mentor?.name ? [updated.mentor.name] : [],
+          },
+        };
+      }
       return { success: false, message: `Student ID ${id} already exists in registry.` };
     }
 
@@ -288,6 +337,54 @@ export async function createIntern(data: {
     });
 
     if (existingWithSamePhone) {
+      if (existingWithSamePhone.status === 'Deleted') {
+        finalId = existingWithSamePhone.id;
+        const rawMentorId = data.mentorId || data.mentorCode;
+        const mentorId = rawMentorId && rawMentorId !== 'UNASSIGNED' ? rawMentorId.trim() : null;
+
+        const updated = await prisma.student.update({
+          where: { id: finalId },
+          data: {
+            name,
+            category: 'Intern',
+            startupName,
+            courseType: 'Intern',
+            department: startupName,
+            year: 0,
+            phone: cleanPhone,
+            status: 'Active',
+            mentorId,
+          },
+          include: { mentor: true },
+        });
+
+        appCache.invalidateTags(['students', 'dashboard', 'mentors', 'food-list']);
+        safeRevalidate('/students');
+        safeRevalidate('/dashboard');
+        safeRevalidate('/daily-food-list');
+
+        return {
+          success: true,
+          message: `✓ Registered Intern ${name} with ID ${finalId} (${startupName}).`,
+          student: {
+            id: updated.id,
+            name: updated.name,
+            category: 'Intern',
+            courseType: 'Intern',
+            department: updated.department,
+            startupName: updated.startupName || undefined,
+            year: 0,
+            email: updated.email || '',
+            phone: updated.phone,
+            status: 'Active',
+            mentorId: updated.mentorId || undefined,
+            mentorName: updated.mentor?.name || 'Unassigned',
+            mentorDept: updated.mentor?.department,
+            mentorCode: updated.mentorId || undefined,
+            projects: updated.mentor?.name ? [updated.mentor.name] : [],
+          },
+        };
+      }
       if (existingWithSamePhone.phone === cleanPhone) {
         return {
           success: false,
@@ -467,13 +564,25 @@ export async function updateStudent(
 }
 
 export async function getMentors(): Promise<MentorRecord[]> {
-  return appCache.get('mentors_all', 30, async () => {
+  return appCache.get('mentors_all', 120, async () => {
     try {
       const mentors = await prisma.mentor.findMany({
-        include: {
-          students: true,
-        },
         orderBy: { name: 'asc' },
+      });
+
+      const activeStudents = await prisma.student.findMany({
+        where: {
+          status: { not: 'Deleted' },
+          mentorId: { not: null },
+        },
+        select: { mentorId: true },
+      });
+
+      const countMap = new Map<string, number>();
+      activeStudents.forEach((s: any) => {
+        if (s.mentorId) {
+          countMap.set(s.mentorId, (countMap.get(s.mentorId) || 0) + 1);
+        }
       });
 
       return mentors.map((m: any) => ({
@@ -485,7 +594,7 @@ export async function getMentors(): Promise<MentorRecord[]> {
         phone: m.phone || undefined,
         email: m.email || undefined,
         status: m.status as 'Active' | 'Inactive',
-        memberCount: m.students?.length || 0,
+        memberCount: countMap.get(m.id) || 0,
       }));
     } catch (error) {
       console.error('Error fetching mentors:', error);
@@ -549,6 +658,100 @@ export async function createMentor(data: {
   }
 }
 
+export async function updateMentor(
+  mentorIdInput: string,
+  data: {
+    name?: string;
+    department?: string;
+    designation?: string;
+    phone?: string;
+    email?: string;
+    status?: string;
+  }
+): Promise<{ success: boolean; message: string; mentor?: MentorRecord }> {
+  const mentorId = mentorIdInput.trim();
+  const name = data.name !== undefined ? data.name.trim() : undefined;
+  if (name !== undefined && !name) {
+    return { success: false, message: 'Mentor name cannot be empty.' };
+  }
+
+  try {
+    const mentor = await prisma.mentor.findUnique({ where: { id: mentorId } });
+    if (!mentor) {
+      return { success: false, message: 'Mentor not found.' };
+    }
+
+    const updatePayload: any = {};
+    if (name !== undefined) updatePayload.name = name;
+    if (data.department !== undefined) updatePayload.department = data.department.trim() || 'Incubation Center';
+    if (data.designation !== undefined) updatePayload.designation = data.designation.trim() || 'Faculty Mentor';
+    if (data.phone !== undefined) updatePayload.phone = data.phone.trim() || null;
+    if (data.email !== undefined) updatePayload.email = data.email.trim() || null;
+    if (data.status !== undefined) updatePayload.status = data.status;
+
+    const updated = await prisma.mentor.update({
+      where: { id: mentorId },
+      data: updatePayload,
+    });
+
+    appCache.invalidateTags(['mentors', 'students', 'dashboard', 'food-list']);
+    safeRevalidate('/students');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/daily-food-list');
+
+    return {
+      success: true,
+      message: `Mentor "${updated.name}" updated successfully.`,
+      mentor: {
+        id: updated.id,
+        code: updated.id,
+        name: updated.name,
+        department: updated.department,
+        designation: updated.designation || 'Faculty Mentor',
+        phone: updated.phone || undefined,
+        email: updated.email || undefined,
+        status: updated.status as 'Active' | 'Inactive',
+        memberCount: 0,
+      },
+    };
+  } catch (error) {
+    console.error('Error updating mentor:', error);
+    return { success: false, message: 'Server error while updating mentor.' };
+  }
+}
+
+export async function deleteMentor(mentorIdInput: string): Promise<{ success: boolean; message: string }> {
+  const mentorId = mentorIdInput.trim();
+  try {
+    const mentor = await prisma.mentor.findUnique({ where: { id: mentorId } });
+    if (!mentor) {
+      return { success: false, message: 'Mentor not found.' };
+    }
+
+    // Unassign all mentees currently assigned to this mentor
+    await prisma.student.updateMany({
+      where: { mentorId },
+      data: { mentorId: null },
+    });
+
+    // Delete mentor
+    await prisma.mentor.delete({ where: { id: mentorId } });
+
+    appCache.invalidateTags(['mentors', 'students', 'dashboard', 'food-list']);
+    safeRevalidate('/students');
+    safeRevalidate('/dashboard');
+    safeRevalidate('/daily-food-list');
+
+    return {
+      success: true,
+      message: `Mentor "${mentor.name}" deleted successfully. Assigned mentees have been unassigned.`,
+    };
+  } catch (error) {
+    console.error('Error deleting mentor:', error);
+    return { success: false, message: 'Server error while deleting mentor.' };
+  }
+}
+
 export async function assignMentor(
   studentIdInput: string,
   mentorIdInput: string
@@ -587,36 +790,46 @@ export async function deleteStudent(studentIdInput: string): Promise<{ success: 
       return { success: false, message: `Student ID "${studentId}" not found.` };
     }
 
-    const [tokenCount, eligibilityCount] = await Promise.all([
-      prisma.foodToken.count({ where: { studentId } }),
-      prisma.dailyFoodEligibility.count({ where: { studentId } }),
-    ]);
+    const tokenCount = await prisma.foodToken.count({ where: { studentId } });
 
-    if (tokenCount > 0 || eligibilityCount > 0) {
+    // Clean up any unredeemed food eligibilities for today or future dates so they don't linger in today's pending mess food queue
+    await prisma.dailyFoodEligibility.deleteMany({
+      where: {
+        studentId,
+        status: 'Eligible',
+      },
+    }).catch(() => {});
+
+    if (tokenCount > 0) {
+      // Mark as Deleted and remove mentor link; preserves full row in PostgreSQL so foodTokens relations stay intact
       await prisma.student.update({
         where: { id: studentId },
-        data: { status: 'Inactive', mentorId: null },
+        data: { status: 'Deleted', mentorId: null },
       });
 
       appCache.invalidateTags(['students', 'mentors', 'dashboard', 'food-list', 'foodtokens']);
       safeRevalidate('/students');
       safeRevalidate('/dashboard');
       safeRevalidate('/daily-food-list');
+      safeRevalidate('/scan-token');
 
       return {
         success: true,
-        message: `Student ${student.name} (${studentId}) archived as Inactive. Historical meal tokens (${tokenCount}) and night-stay logs are permanently preserved.`,
+        message: `Member ${student.name} (${studentId}) removed from registry. Past meal tokens (${tokenCount}) permanently preserved.`,
       };
     }
 
+    // No historical tokens issued: clean up any remaining eligibilities and delete student record completely
+    await prisma.dailyFoodEligibility.deleteMany({ where: { studentId } }).catch(() => {});
     await prisma.student.delete({ where: { id: studentId } });
 
-    appCache.invalidateTags(['students', 'mentors', 'dashboard', 'food-list']);
+    appCache.invalidateTags(['students', 'mentors', 'dashboard', 'food-list', 'foodtokens']);
     safeRevalidate('/students');
     safeRevalidate('/dashboard');
     safeRevalidate('/daily-food-list');
+    safeRevalidate('/scan-token');
 
-    return { success: true, message: `Student ${student.name} (${studentId}) deleted successfully.` };
+    return { success: true, message: `Member ${student.name} (${studentId}) deleted successfully.` };
   } catch (error) {
     console.error('Error deleting student:', error);
     return { success: false, message: 'Server error while deleting student record.' };
@@ -628,33 +841,37 @@ export async function deleteStudent(studentIdInput: string): Promise<{ success: 
 // ---------------------------------------------------------------------------
 export async function getDashboardStats(dateInput?: string) {
   const date = dateInput || getTodayISTDateString();
-  return appCache.get(`dashboard_${date}`, 30, async () => {
+  return appCache.get(`dashboard_${date}`, 60, async () => {
     try {
-      const [students, mentors, foodList, eligibilities, tokens] = await Promise.all([
-        prisma.student.findMany(),
-        prisma.mentor.findMany(),
+      const session = getMealSession();
+      const yesterdayStr = getPreviousISTDateString(date);
+      const needYesterday = session === 'BREAKFAST' || session === 'LUNCH';
+
+      const [students, mentors, foodList, eligibilities, tokens, overnightStayCount] = await Promise.all([
+        prisma.student.findMany({
+          where: { status: { not: 'Deleted' } },
+          select: { id: true, status: true },
+        }),
+        prisma.mentor.findMany({
+          select: { id: true, status: true },
+        }),
         prisma.dailyFoodList.findUnique({
           where: { date },
-          include: { entries: true },
+          select: { status: true, finalizedBy: true },
         }),
         prisma.dailyFoodEligibility.findMany({
           where: { date },
+          select: { id: true },
         }),
         prisma.foodToken.findMany({
           where: { date },
           include: { student: true, mentor: true },
           orderBy: { issuedAt: 'desc' },
         }),
+        needYesterday
+          ? prisma.dailyFoodEligibility.count({ where: { date: yesterdayStr } })
+          : Promise.resolve(0),
       ]);
-
-      const session = getMealSession();
-      const yesterdayStr = getPreviousISTDateString(date);
-      let overnightStayCount = 0;
-      if (session === 'BREAKFAST' || session === 'LUNCH') {
-        overnightStayCount = await prisma.dailyFoodEligibility.count({
-          where: { date: yesterdayStr },
-        });
-      }
 
       return {
         date,
@@ -701,10 +918,14 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
   const date = dateInput || getTodayISTDateString();
   return appCache.get(`dash_bundle_${date}`, 60, async () => {
     try {
-      const [list, eligibilities, rawTokens, students, mentors] = await Promise.all([
+      const session = getMealSession();
+      const yesterdayStr = getPreviousISTDateString(date);
+      const needYesterday = session === 'BREAKFAST' || session === 'LUNCH';
+
+      const [list, eligibilities, rawTokens, students, mentors, oCount, yTokens] = await Promise.all([
         prisma.dailyFoodList.findUnique({
           where: { date },
-          include: { entries: true },
+          select: { status: true, finalizedBy: true, finalizedAt: true },
         }),
         prisma.dailyFoodEligibility.findMany({
           where: { date },
@@ -717,32 +938,26 @@ export async function getDashboardBundle(dateInput?: string): Promise<DashboardB
         }),
         getStudents(),
         getMentors(),
+        needYesterday
+          ? prisma.dailyFoodEligibility.count({ where: { date: yesterdayStr } })
+          : Promise.resolve(0),
+        needYesterday
+          ? prisma.foodToken.findMany({
+              where: {
+                date: yesterdayStr,
+                session: { in: ['DINNER', 'Dinner', 'dinner'] },
+              },
+              select: { id: true, issuedAt: true },
+              orderBy: { issuedAt: 'desc' },
+            })
+          : Promise.resolve([]),
       ]);
 
-      const session = getMealSession();
-      const yesterdayStr = getPreviousISTDateString(date);
-      let overnightStayCount = 0;
-      let yesterdayDinnerTokensCount = 0;
+      let overnightStayCount = oCount;
+      let yesterdayDinnerTokensCount = Array.isArray(yTokens) ? yTokens.length : 0;
       let yesterdayLastDinnerTime: string | null = null;
-      if (session === 'BREAKFAST' || session === 'LUNCH') {
-        const [oCount, yTokens] = await Promise.all([
-          prisma.dailyFoodEligibility.count({
-            where: { date: yesterdayStr },
-          }),
-          prisma.foodToken.findMany({
-            where: {
-              date: yesterdayStr,
-              session: { in: ['DINNER', 'Dinner', 'dinner'] },
-            },
-            select: { id: true, issuedAt: true },
-            orderBy: { issuedAt: 'desc' },
-          }),
-        ]);
-        overnightStayCount = oCount;
-        yesterdayDinnerTokensCount = yTokens.length;
-        if (yTokens.length > 0 && yTokens[0].issuedAt) {
-          yesterdayLastDinnerTime = formatISTTime(yTokens[0].issuedAt);
-        }
+      if (Array.isArray(yTokens) && yTokens.length > 0 && yTokens[0].issuedAt) {
+        yesterdayLastDinnerTime = formatISTTime(yTokens[0].issuedAt);
       }
 
       const entries = eligibilities.map((e: any) => {
@@ -833,7 +1048,7 @@ export interface StudentsBundleData {
 }
 
 export async function getStudentsBundle(): Promise<StudentsBundleData> {
-  return appCache.get('students_bundle', 20, async () => {
+  return appCache.get('students_bundle', 120, async () => {
     try {
       const [students, mentors] = await Promise.all([
         getStudents(),

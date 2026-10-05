@@ -744,10 +744,6 @@ export default function ScanToken() {
                   </span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-slate-500">Affiliation / Project:</span>
-                <span className="font-medium text-slate-800">{projectName || 'Incubation Member'}</span>
-              </div>
               <div className="flex justify-between pt-1 border-t border-slate-200">
                 <span className="text-slate-500">Meal Session:</span>
                 <span className="font-bold text-indigo-900 uppercase">{currentMealSession}</span>
@@ -836,10 +832,6 @@ export default function ScanToken() {
                     <span>{student?.department || '—'}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-slate-500">PROJECT / MENTOR:</span>
-                  <span>{generatedToken?.project || projectName || 'Incubation Member'}</span>
-                </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">SESSION:</span>
                   <span className="font-bold text-indigo-900 uppercase">{generatedToken?.session || currentMealSession}</span>

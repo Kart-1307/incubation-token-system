@@ -305,6 +305,9 @@ const memoryPrisma: any = {
     delete: async ({ where }: any) => {
       const idx = store.mentors.findIndex(m => m.id === where.id);
       if (idx !== -1) {
+        store.students.forEach(s => {
+          if (s.mentorId === where.id) s.mentorId = null;
+        });
         return store.mentors.splice(idx, 1)[0];
       }
       return null;
@@ -359,7 +362,14 @@ const memoryPrisma: any = {
         list = list.filter(s => s.department === args.where.department);
       }
       if (args.where?.status) {
-        list = list.filter(s => s.status === args.where.status);
+        if (typeof args.where.status === 'object' && args.where.status.not) {
+          list = list.filter(s => s.status !== args.where.status.not);
+        } else {
+          list = list.filter(s => s.status === args.where.status);
+        }
+      }
+      if (args.where?.NOT?.status) {
+        list = list.filter(s => s.status !== args.where.NOT.status);
       }
       if (args.include?.mentor) {
         return list.map(s => ({
@@ -368,6 +378,19 @@ const memoryPrisma: any = {
         }));
       }
       return list;
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      store.students.forEach(s => {
+        let match = true;
+        if (where?.mentorId && s.mentorId !== where.mentorId) match = false;
+        if (where?.status && s.status !== where.status) match = false;
+        if (match) {
+          Object.assign(s, data, { updatedAt: new Date() });
+          count++;
+        }
+      });
+      return { count };
     },
     create: async ({ data }: { data: any }) => {
       const existing = store.students.find(s => s.id.toUpperCase() === data.id.toUpperCase());

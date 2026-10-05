@@ -320,13 +320,21 @@ function DailyFoodListContent() {
     router.replace(query ? `?${query}` : window.location.pathname, { scroll: false });
   };
 
-  // Load master student, project & mentor registries ONCE on mount (cached in memory)
+  // Load master student & mentor registries ONCE on mount (cached in memory)
   useEffect(() => {
     let isMounted = true;
-    if (globalStudentsCache.length === 0 || globalProjectsCache.length === 0 || globalMentorsCache.length === 0) {
-      Promise.all([getStudents(), getProjects(), getMentors()])
-        .then(([students, projects, mentors]) => {
+    if (globalStudentsCache.length === 0 || globalMentorsCache.length === 0) {
+      Promise.all([getStudents(), getMentors()])
+        .then(([students, mentors]) => {
           if (isMounted) {
+            const projects: ProjectRecord[] = mentors.map(m => ({
+              code: m.id,
+              name: m.name,
+              description: `${m.department} · ${m.designation}`,
+              status: m.status === 'Active' ? 'Active' : 'Inactive',
+              createdDate: '2026-10-01',
+              members: [],
+            }));
             globalStudentsCache = students;
             globalProjectsCache = projects;
             globalMentorsCache = mentors;
@@ -336,13 +344,6 @@ function DailyFoodListContent() {
           }
         })
         .catch(err => console.error('Registry load error:', err));
-    } else {
-      getMentors().then(m => {
-        if (isMounted) {
-          globalMentorsCache = m;
-          setMentorRegistry(m);
-        }
-      }).catch(() => {});
     }
     return () => {
       isMounted = false;

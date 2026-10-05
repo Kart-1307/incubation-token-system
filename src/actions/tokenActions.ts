@@ -117,6 +117,10 @@ async function resolveStudent(dbOrTx: any, idInput: string) {
     });
   }
 
+  if (student && student.status === 'Deleted') {
+    return null;
+  }
+
   return student;
 }
 
@@ -517,7 +521,7 @@ export async function issueFoodToken(
 
 export async function getFoodTokens(date?: string) {
   const cacheKey = date ? `tokens_${date}` : 'tokens_all';
-  return appCache.get(cacheKey, 30, async () => {
+  return appCache.get(cacheKey, 60, async () => {
     try {
       const where = date ? { date } : undefined;
       const tokens = await prisma.foodToken.findMany({

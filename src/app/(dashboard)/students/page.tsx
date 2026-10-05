@@ -9,6 +9,8 @@ import {
   updateStudent,
   deleteStudent,
   createMentor,
+  updateMentor,
+  deleteMentor,
   assignMentor,
   type StudentRecord,
   type ProjectRecord,
@@ -105,6 +107,21 @@ export default function Students() {
   });
   const [mentorFormError, setMentorFormError] = useState('');
   const [isSavingMentor, setIsSavingMentor] = useState(false);
+
+  // Edit & Delete Mentor states
+  const [mentorToEdit, setMentorToEdit] = useState<MentorRecord | null>(null);
+  const [editMentorForm, setEditMentorForm] = useState({
+    name: '',
+    department: 'Incubation Center',
+    designation: 'Faculty Mentor',
+    phone: '',
+    email: '',
+    status: 'Active' as 'Active' | 'Inactive',
+  });
+  const [editMentorFormError, setEditMentorFormError] = useState('');
+  const [isSavingMentorEdit, setIsSavingMentorEdit] = useState(false);
+  const [mentorToDelete, setMentorToDelete] = useState<MentorRecord | null>(null);
+  const [isDeletingMentor, setIsDeletingMentor] = useState(false);
 
   // Edit Member Modal states
   const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
@@ -365,15 +382,91 @@ export default function Students() {
     }
   };
 
-  const handleConfirmDelete = async () => {
-    if (!studentToDelete) return;
+  const handleOpenEditMentor = (mentor: MentorRecord) => {
+    setMentorToEdit(mentor);
+    setEditMentorForm({
+      name: mentor.name,
+      department: mentor.department || 'Incubation Center',
+      designation: mentor.designation || 'Faculty Mentor',
+      phone: mentor.phone || '',
+      email: mentor.email || '',
+      status: (mentor.status as 'Active' | 'Inactive') || 'Active',
+    });
+    setEditMentorFormError('');
+  };
+
+  const handleSaveMentorEdit = async () => {
+    if (!mentorToEdit) return;
+    if (!editMentorForm.name.trim()) {
+      setEditMentorFormError('Mentor Full Name is required.');
+      return;
+    }
+
+    setIsSavingMentorEdit(true);
+    setEditMentorFormError('');
     try {
-      const res = await deleteStudent(studentToDelete.id);
+      const res = await updateMentor(mentorToEdit.id, {
+        name: editMentorForm.name,
+        department: editMentorForm.department,
+        designation: editMentorForm.designation,
+        phone: editMentorForm.phone || undefined,
+        email: editMentorForm.email || undefined,
+        status: editMentorForm.status,
+      });
+
+      if (res.success) {
+        showToast(res.message);
+        setMentorToEdit(null);
+        await loadData();
+      } else {
+        setEditMentorFormError(res.message);
+      }
+    } catch (e: any) {
+      setEditMentorFormError(e?.message || 'Error updating mentor.');
+    } finally {
+      setIsSavingMentorEdit(false);
+    }
+  };
+
+  const handleConfirmDeleteMentor = async () => {
+    if (!mentorToDelete) return;
+    setIsDeletingMentor(true);
+    try {
+      const res = await deleteMentor(mentorToDelete.id);
       showToast(res.message);
-      setStudentToDelete(null);
+      setMentorToDelete(null);
       await loadData();
     } catch (e) {
-      showToast('Error deleting student.');
+      showToast('Error deleting mentor.');
+    } finally {
+      setIsDeletingMentor(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!studentToDelete) return;
+    const targetId = studentToDelete.id;
+    const targetName = studentToDelete.name;
+
+    // Instant optimistic UI removal: remove from list immediately
+    setStudentList(prev => prev.filter(s => s.id !== targetId));
+    setStudentToDelete(null);
+
+    // Clear client-side cache so the deleted student does not resurface
+    memoryStudentsCache = null;
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('incubation_students_cache');
+      } catch {}
+    }
+
+    try {
+      const res = await deleteStudent(targetId);
+      showToast(res.message);
+      await loadData();
+    } catch (e) {
+      showToast(`Error deleting ${targetName}.`);
+      await loadData();
     }
   };
 
@@ -676,20 +769,11 @@ export default function Students() {
       {categoryTab === 'mentors' ? (
         <div className="space-y-4">
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div>
-                <h3 className="font-bold text-slate-800 text-base">Incubation Mentors</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Mentors guide students and startup cohorts. You can add mentors here or assign members to mentors.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddMentor(true)}
-                className="text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                + Create Mentor
-              </button>
+            <div className="mb-4">
+              <h3 className="font-bold text-slate-800 text-base">Incubation Mentors</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Mentors guide students and startup cohorts. Use &ldquo;+ Add Mentor&rdquo; above to register new mentors or manage existing mentors below.
+              </p>
             </div>
 
             {mentorList.length === 0 ? (
@@ -705,19 +789,49 @@ export default function Students() {
                 {mentorList.map(m => {
                   const assignedCount = studentList.filter(s => s.mentorId === m.id || s.mentorCode === (m.id || m.code) || s.mentorName === m.name).length;
                   return (
-                    <div key={m.id || m.code} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h4 className="font-bold text-slate-900 text-sm">{m.name}</h4>
-                          <span className="text-xs text-slate-500">{m.department} · {m.designation}</span>
+                    <div key={m.id || m.code} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-sm">{m.name}</h4>
+                            <span className="text-xs text-slate-500">{m.department} · {m.designation}</span>
+                            {m.phone && <p className="text-[11px] text-slate-400 mt-0.5 font-mono">📞 {m.phone}</p>}
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                            {assignedCount} Mentees
+                          </span>
                         </div>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          {assignedCount} Mentees
-                        </span>
                       </div>
+
                       <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500">
-                        <span className="font-medium text-slate-600">{m.designation || 'Faculty Mentor'}</span>
-                        <span className="text-emerald-700 font-semibold font-sans">Active</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-600">{m.designation || 'Faculty Mentor'}</span>
+                          <span className={`text-[11px] font-semibold ${m.status === 'Inactive' ? 'text-amber-600' : 'text-emerald-700'}`}>
+                            {m.status || 'Active'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            title="Edit Mentor"
+                            onClick={() => handleOpenEditMentor(m)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            title="Delete Mentor"
+                            onClick={() => setMentorToDelete(m)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1605,9 +1719,9 @@ export default function Students() {
       {studentToDelete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete or Archive Member?</h3>
+            <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete Member?</h3>
             <p className="text-sm text-slate-500 mb-4">
-              Are you sure you want to remove <span className="font-bold text-slate-800">{studentToDelete.name}</span> (<span className="font-mono text-indigo-700">{studentToDelete.id}</span>)? All historical meal tokens and night-stay logs will be safely preserved.
+              Are you sure you want to delete <span className="font-bold text-slate-800">{studentToDelete.name}</span> (<span className="font-mono text-indigo-700">{studentToDelete.id}</span>)? The member will be removed from the registry, while all past token history and meal logs will remain permanently intact.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -1626,6 +1740,162 @@ export default function Students() {
           </div>
         </div>
       )}
+
+      {/* EDIT MENTOR MODAL */}
+      {mentorToEdit && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+              <div>
+                <h3 className="font-semibold text-slate-800 text-lg">Edit Mentor Details</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Update mentor profile information and affiliation.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setMentorToEdit(null); setEditMentorFormError(''); }}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg leading-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mentor Full Name *</label>
+                <input
+                  type="text"
+                  value={editMentorForm.name}
+                  onChange={e => setEditMentorForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Dr. S. Ramesh"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Department / Facility</label>
+                <input
+                  type="text"
+                  value={editMentorForm.department}
+                  onChange={e => setEditMentorForm(p => ({ ...p, department: e.target.value }))}
+                  placeholder="e.g. ECE / Incubation Center"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Designation</label>
+                <input
+                  type="text"
+                  value={editMentorForm.designation}
+                  onChange={e => setEditMentorForm(p => ({ ...p, designation: e.target.value }))}
+                  placeholder="e.g. Faculty Mentor / Associate Professor"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    value={editMentorForm.phone}
+                    onChange={e => setEditMentorForm(p => ({ ...p, phone: e.target.value }))}
+                    placeholder="9876543210"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                  <select
+                    value={editMentorForm.status}
+                    onChange={e => setEditMentorForm(p => ({ ...p, status: e.target.value as 'Active' | 'Inactive' }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  value={editMentorForm.email}
+                  onChange={e => setEditMentorForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="mentor@sairam.edu.in"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {editMentorFormError && (
+                <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">
+                  {editMentorFormError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setMentorToEdit(null); setEditMentorFormError(''); }}
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMentorEdit}
+                disabled={isSavingMentorEdit}
+                className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg transition-colors font-medium shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                {isSavingMentorEdit ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE MENTOR CONFIRMATION MODAL */}
+      {mentorToDelete && (() => {
+        const assignedMenteesCount = studentList.filter(s => s.mentorId === mentorToDelete.id || s.mentorCode === (mentorToDelete.id || mentorToDelete.code) || s.mentorName === mentorToDelete.name).length;
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+              <h3 className="font-semibold text-slate-800 text-lg mb-2">Delete Mentor?</h3>
+              <p className="text-sm text-slate-500 mb-3">
+                Are you sure you want to delete <span className="font-bold text-slate-800">{mentorToDelete.name}</span>?
+              </p>
+              {assignedMenteesCount > 0 ? (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 mb-4">
+                  ⚠️ <span className="font-bold">{assignedMenteesCount} active mentee(s)</span> are currently assigned to this mentor. Deleting will safely unassign them while permanently keeping all student profiles and historical tokens intact.
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 mb-4">
+                  This mentor has no mentees currently assigned.
+                </p>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMentorToDelete(null)}
+                  className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteMentor}
+                  disabled={isDeletingMentor}
+                  className="px-4 py-2 text-sm bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors cursor-pointer shadow-xs"
+                >
+                  {isDeletingMentor ? 'Deleting...' : 'Delete Mentor'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {toast && (
         <div className="fixed bottom-6 right-6 bg-slate-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-xl z-50">

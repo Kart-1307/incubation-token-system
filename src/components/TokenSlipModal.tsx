@@ -108,12 +108,6 @@ export default function TokenSlipModal({ token, isOpen, onClose }: TokenSlipModa
                 )
               )}
               <div className="flex justify-between gap-1">
-                <span className="text-slate-500">
-                  {token.category === 'Intern' || token.studentId.startsWith('INT-') ? 'AFFILIATION:' : 'PROJECT:'}
-                </span>
-                <span className="font-bold text-right truncate">{token.project}</span>
-              </div>
-              <div className="flex justify-between gap-1">
                 <span className="text-slate-500">TIME:</span>
                 <span className="text-right">
                   {formatISTDateDMY(token.date)} · {formatISTTime(timeStr)}
