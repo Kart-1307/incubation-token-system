@@ -123,6 +123,9 @@ export default function Students() {
   const [mentorToDelete, setMentorToDelete] = useState<MentorRecord | null>(null);
   const [isDeletingMentor, setIsDeletingMentor] = useState(false);
 
+  // View Mentor Mentees modal state
+  const [selectedMentorForMentees, setSelectedMentorForMentees] = useState<MentorRecord | null>(null);
+
   // Edit Member Modal states
   const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
   const [studentToEdit, setStudentToEdit] = useState<StudentRecord | null>(null);
@@ -273,7 +276,7 @@ export default function Students() {
         return;
       }
     } else {
-      resolvedMentorCode = (memberType === 'intern' ? internForm.mentorCode : form.mentorCode) || undefined;
+      resolvedMentorCode = (memberType === 'intern' ? undefined : form.mentorCode) || undefined;
     }
 
     if (memberType === 'intern') {
@@ -294,7 +297,6 @@ export default function Students() {
         name: internForm.name,
         phone: internForm.phone,
         startupName: internForm.startupName,
-        mentorCode: resolvedMentorCode,
       });
 
       if (res.success) {
@@ -789,16 +791,23 @@ export default function Students() {
                 {mentorList.map(m => {
                   const assignedCount = studentList.filter(s => s.mentorId === m.id || s.mentorCode === (m.id || m.code) || s.mentorName === m.name).length;
                   return (
-                    <div key={m.id || m.code} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors flex flex-col justify-between">
+                    <div
+                      key={m.id || m.code}
+                      onClick={() => setSelectedMentorForMentees(m)}
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 hover:border-indigo-300 hover:shadow-md transition-all flex flex-col justify-between cursor-pointer group"
+                    >
                       <div>
                         <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h4 className="font-bold text-slate-900 text-sm">{m.name}</h4>
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-slate-900 text-sm group-hover:text-indigo-700 transition-colors flex items-center gap-1.5 truncate">
+                              <span>{m.name}</span>
+                              <span className="text-slate-400 group-hover:text-indigo-600 text-xs transition-colors">→</span>
+                            </h4>
                             <span className="text-xs text-slate-500">{m.department} · {m.designation}</span>
                             {m.phone && <p className="text-[11px] text-slate-400 mt-0.5 font-mono">📞 {m.phone}</p>}
                           </div>
                           <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
-                            {assignedCount} Mentees
+                            {assignedCount} {assignedCount === 1 ? 'Mentee' : 'Mentees'}
                           </span>
                         </div>
                       </div>
@@ -810,7 +819,7 @@ export default function Students() {
                             {m.status || 'Active'}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                           <button
                             type="button"
                             title="Edit Mentor"
@@ -1138,84 +1147,6 @@ export default function Students() {
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-sm font-medium text-slate-700">Assigned Mentor (Optional)</label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsAddingNewMentorInline(p => !p);
-                          setInlineMentorName('');
-                          setInlineMentorDept('');
-                        }}
-                        className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-                      >
-                        {isAddingNewMentorInline ? '← Select Existing' : '+ Type New Mentor'}
-                      </button>
-                    </div>
-
-                    {isAddingNewMentorInline ? (
-                      <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2 animate-in fade-in duration-150">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-indigo-900 flex items-center gap-1">
-                            <span>👥</span> Add Mentor On-the-Fly
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsAddingNewMentorInline(false);
-                              setInlineMentorName('');
-                            }}
-                            className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        <div>
-                          <input
-                            type="text"
-                            value={inlineMentorName}
-                            onChange={e => setInlineMentorName(e.target.value)}
-                            placeholder="Mentor Full Name (e.g. Dr. S. Ramesh) *"
-                            className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </div>
-                        <div>
-                          <input
-                            type="text"
-                            value={inlineMentorDept}
-                            onChange={e => setInlineMentorDept(e.target.value)}
-                            placeholder="Department / Role (Optional, e.g. Incubation / Guide)"
-                            className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </div>
-                        <p className="text-[10px] text-indigo-700">
-                          ✨ Will be automatically registered in Mentors directory and assigned to this intern upon saving.
-                        </p>
-                      </div>
-                    ) : (
-                      <select
-                        value={internForm.mentorCode}
-                        onChange={e => {
-                          if (e.target.value === '__NEW__') {
-                            setIsAddingNewMentorInline(true);
-                          } else {
-                            setInternForm(p => ({ ...p, mentorCode: e.target.value }));
-                          }
-                        }}
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                      >
-                        <option value="">Unassigned (Default)</option>
-                        {mentorList.map(m => (
-                          <option key={m.id || m.code} value={m.id || m.code}>
-                            {m.name} ({m.department})
-                          </option>
-                        ))}
-                        <option value="__NEW__">➕ + Type New Mentor...</option>
-                      </select>
-                    )}
-                  </div>
                 </div>
               ) : (
                 /* COLLEGE STUDENT FORM */
@@ -1501,6 +1432,134 @@ export default function Students() {
         </div>
       )}
 
+      {/* MENTOR MENTEES & DETAILS MODAL */}
+      {selectedMentorForMentees && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between p-5 border-b border-slate-200 shrink-0 bg-slate-50/70">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-indigo-100 border border-indigo-200 text-indigo-700 flex items-center justify-center text-xl shrink-0">
+                  👨‍🏫
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-900 text-lg">{selectedMentorForMentees.name}</h3>
+                    <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      {studentList.filter(s => s.mentorId === selectedMentorForMentees.id || s.mentorCode === (selectedMentorForMentees.id || selectedMentorForMentees.code) || s.mentorName === selectedMentorForMentees.name).length} Mentees
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {selectedMentorForMentees.department} · {selectedMentorForMentees.designation || 'Faculty Mentor'}
+                    {selectedMentorForMentees.phone ? ` · 📞 ${selectedMentorForMentees.phone}` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedMentorForMentees(null)}
+                className="text-slate-400 hover:text-slate-600 text-2xl leading-none cursor-pointer p-1"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body: Mentees List */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-3">
+              {(() => {
+                const mentees = studentList.filter(s =>
+                  s.mentorId === selectedMentorForMentees.id ||
+                  s.mentorCode === (selectedMentorForMentees.id || selectedMentorForMentees.code) ||
+                  s.mentorName === selectedMentorForMentees.name
+                );
+
+                if (mentees.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-slate-400">
+                      <div className="text-4xl mb-2">👥</div>
+                      <div className="font-semibold text-slate-700 text-sm">No students currently assigned</div>
+                      <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                        There are currently no college students registered under {selectedMentorForMentees.name}. When registering students, assign them to this mentor to view them here.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-1">
+                      Assigned Students ({mentees.length})
+                    </div>
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                      {mentees.map(student => (
+                        <div
+                          key={student.id}
+                          className="p-3.5 hover:bg-slate-50 flex items-center justify-between gap-3 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shrink-0">
+                              🎓
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-900 text-sm truncate">{student.name}</span>
+                                <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-semibold">
+                                  {student.id}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 truncate mt-0.5">
+                                {student.department}{student.year ? ` · Year ${student.year}` : ''}
+                                {student.phone ? ` · 📞 ${student.phone}` : ''}
+                                {student.email ? ` · ✉️ ${student.email}` : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                              student.status === 'Active'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}>
+                              {student.status || 'Active'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedMentorForMentees(null);
+                                setSelected(student);
+                                setView('detail');
+                              }}
+                              className="px-2.5 py-1 text-xs font-medium text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200/80 transition-colors cursor-pointer"
+                            >
+                              View Profile →
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-between items-center px-6 py-3.5 border-t border-slate-200 bg-slate-50 shrink-0">
+              <span className="text-xs text-slate-500">
+                Incubation Food Management System
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedMentorForMentees(null)}
+                className="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors font-medium cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* QUICK EDIT MEMBER MODAL */}
       {studentToEdit && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -1583,84 +1642,86 @@ export default function Students() {
                 </div>
               )}
 
-              {/* Assigned Mentor */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-slate-700">Assigned Mentor</label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditIsAddingNewMentorInline(p => !p);
-                      setEditInlineMentorName('');
-                      setEditInlineMentorDept('');
-                    }}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-                  >
-                    {editIsAddingNewMentorInline ? '← Select Existing' : '+ Type New Mentor'}
-                  </button>
-                </div>
-
-                {editIsAddingNewMentorInline ? (
-                  <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2 animate-in fade-in duration-150">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-indigo-900 flex items-center gap-1">
-                        <span>👥</span> Add Mentor On-the-Fly
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditIsAddingNewMentorInline(false);
-                          setEditInlineMentorName('');
-                        }}
-                        className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        value={editInlineMentorName}
-                        onChange={e => setEditInlineMentorName(e.target.value)}
-                        placeholder="Mentor Full Name (e.g. Dr. S. Ramesh) *"
-                        className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        value={editInlineMentorDept}
-                        onChange={e => setEditInlineMentorDept(e.target.value)}
-                        placeholder="Department / Role (Optional, e.g. CSE / Guide)"
-                        className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <p className="text-[10px] text-indigo-700">
-                      ✨ Will register mentor in directory and immediately link to this member upon saving.
-                    </p>
+              {/* Assigned Mentor (Only for College Students, not Startup Interns) */}
+              {!(studentToEdit.category === 'Intern' || studentToEdit.courseType === 'Intern' || studentToEdit.id.startsWith('INT-')) && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-slate-700">Assigned Mentor</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditIsAddingNewMentorInline(p => !p);
+                        setEditInlineMentorName('');
+                        setEditInlineMentorDept('');
+                      }}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                    >
+                      {editIsAddingNewMentorInline ? '← Select Existing' : '+ Type New Mentor'}
+                    </button>
                   </div>
-                ) : (
-                  <select
-                    value={editForm.mentorCode}
-                    onChange={e => {
-                      if (e.target.value === '__NEW__') {
-                        setEditIsAddingNewMentorInline(true);
-                      } else {
-                        setEditForm(p => ({ ...p, mentorCode: e.target.value }));
-                      }
-                    }}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                  >
-                    <option value="UNASSIGNED">Unassigned</option>
-                    {mentorList.map(m => (
-                      <option key={m.id || m.code} value={m.id || m.code}>
-                        {m.name} ({m.department})
-                      </option>
-                    ))}
-                    <option value="__NEW__">➕ + Type New Mentor...</option>
-                  </select>
-                )}
-              </div>
+
+                  {editIsAddingNewMentorInline ? (
+                    <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-indigo-900 flex items-center gap-1">
+                          <span>👥</span> Add Mentor On-the-Fly
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditIsAddingNewMentorInline(false);
+                            setEditInlineMentorName('');
+                          }}
+                          className="text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          value={editInlineMentorName}
+                          onChange={e => setEditInlineMentorName(e.target.value)}
+                          placeholder="Mentor Full Name (e.g. Dr. S. Ramesh) *"
+                          className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          value={editInlineMentorDept}
+                          onChange={e => setEditInlineMentorDept(e.target.value)}
+                          placeholder="Department / Role (Optional, e.g. CSE / Guide)"
+                          className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <p className="text-[10px] text-indigo-700">
+                        ✨ Will register mentor in directory and immediately link to this member upon saving.
+                      </p>
+                    </div>
+                  ) : (
+                    <select
+                      value={editForm.mentorCode}
+                      onChange={e => {
+                        if (e.target.value === '__NEW__') {
+                          setEditIsAddingNewMentorInline(true);
+                        } else {
+                          setEditForm(p => ({ ...p, mentorCode: e.target.value }));
+                        }
+                      }}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                    >
+                      <option value="UNASSIGNED">Unassigned</option>
+                      {mentorList.map(m => (
+                        <option key={m.id || m.code} value={m.id || m.code}>
+                          {m.name} ({m.department})
+                        </option>
+                      ))}
+                      <option value="__NEW__">➕ + Type New Mentor...</option>
+                    </select>
+                  )}
+                </div>
+              )}
 
               {/* Contact Info */}
               <div className="grid grid-cols-2 gap-3">
