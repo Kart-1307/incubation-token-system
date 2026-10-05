@@ -155,7 +155,7 @@ export default function Dashboard() {
 
   const isBreakfastOrLunch = currentSession === 'BREAKFAST' || currentSession === 'LUNCH';
   const rawEligibleCount = todayList?.entries.length ?? 0;
-  const isCarriedOver = isBreakfastOrLunch && overnightStayCount > 0;
+  const isCarriedOver = isBreakfastOrLunch;
   const eligibleCount = isCarriedOver ? overnightStayCount : rawEligibleCount;
   const tokensGeneratedCount = tokensList.length;
 
@@ -195,7 +195,7 @@ export default function Dashboard() {
       // DAYTIME (Breakfast or Lunch): Resolving Yesterday's Night Stay
       // Cycle: [1. Yesterday Dinner] -> [2. Today Breakfast] -> [3. Today Lunch]
       // -------------------------------------------------------------
-      const activeApproved = overnightStayCount > 0 ? overnightStayCount : (rawEligibleCount > 0 ? rawEligibleCount : 0);
+      const activeApproved = overnightStayCount;
       const dinnerApprovedCount = overnightStayCount > 0 ? overnightStayCount : (yesterdayDinnerTokensCount > 0 ? yesterdayDinnerTokensCount : 0);
       const dinnerIssued = Math.min(yesterdayDinnerTokensCount, dinnerApprovedCount);
       const dinnerPending = Math.max(0, dinnerApprovedCount - dinnerIssued);
@@ -223,9 +223,7 @@ export default function Dashboard() {
         issued: dinnerIssued,
         pending: dinnerPending,
         turnout: dinnerTurnout,
-        cycleLabel: overnightStayCount > 0
-          ? `Night Stay (${formatISTDateDMY(yesterdayStr)})`
-          : (yesterdayDinnerTokensCount > 0 ? `Dinner Record (${formatISTDateDMY(yesterdayStr)})` : `Night Stay (${formatISTDateDMY(yesterdayStr)})`),
+        cycleLabel: `Night Stay (${formatISTDateDMY(yesterdayStr)})`,
         isNightCarryover: true,
         isFutureScheduled: false,
         lastTime: yesterdayLastDinnerTime,
@@ -245,10 +243,8 @@ export default function Dashboard() {
         issued: breakfastTokens,
         pending: breakfastPending,
         turnout: breakfastTurnout,
-        cycleLabel: overnightStayCount > 0
-          ? `Night Stay (${formatISTDateDMY(yesterdayStr)})`
-          : (rawEligibleCount > 0 ? `Approved List (${formatISTDateDMY(todayStr)})` : `Night Stay (${formatISTDateDMY(yesterdayStr)})`),
-        isNightCarryover: overnightStayCount > 0,
+        cycleLabel: `Night Stay (${formatISTDateDMY(yesterdayStr)})`,
+        isNightCarryover: true,
         isFutureScheduled: false,
         lastTime: lastTokenTime.BREAKFAST,
       };
@@ -267,10 +263,8 @@ export default function Dashboard() {
         issued: lunchTokens,
         pending: lunchPending,
         turnout: lunchTurnout,
-        cycleLabel: overnightStayCount > 0
-          ? `Night Stay (${formatISTDateDMY(yesterdayStr)})`
-          : (rawEligibleCount > 0 ? `Approved List (${formatISTDateDMY(todayStr)})` : `Night Stay (${formatISTDateDMY(yesterdayStr)})`),
-        isNightCarryover: overnightStayCount > 0,
+        cycleLabel: `Night Stay (${formatISTDateDMY(yesterdayStr)})`,
+        isNightCarryover: true,
         isFutureScheduled: false,
         lastTime: lastTokenTime.LUNCH,
       };
