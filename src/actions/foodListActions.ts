@@ -480,8 +480,8 @@ export async function finalizeFoodList(
 export interface DatewiseLogSummary {
   date: string; // The Night-Stay date (e.g. 2026-09-29)
   nextDate: string; // The morning/afternoon date (e.g. 2026-09-30)
-  status: 'Draft' | 'Finalized';
-  cycleStatus: 'Upcoming' | 'In Progress' | 'Completed';
+  status: 'Draft' | 'Finalized' | 'No Stay';
+  cycleStatus: 'Upcoming' | 'In Progress' | 'Completed' | 'No Stay Cohort';
   finalizedBy?: string | null;
   finalizedAt?: string | null;
   totalEligible: number; // Students registered for overnight stay on Date D
@@ -508,9 +508,9 @@ export interface StudentMealAudit {
   department: string;
   year: number;
   projectCode: string;
-  dinner: { issued: boolean; tokenNumber?: string; time?: string };
-  breakfast: { issued: boolean; tokenNumber?: string; time?: string };
-  lunch: { issued: boolean; tokenNumber?: string; time?: string };
+  dinner: { issued: boolean; tokenNumber?: string; time?: string; date?: string };
+  breakfast: { issued: boolean; tokenNumber?: string; time?: string; date?: string };
+  lunch: { issued: boolean; tokenNumber?: string; time?: string; date?: string };
   mealsClaimed: number;
 }
 
@@ -545,6 +545,22 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
 
       const todayStr = getTodayISTDateString();
       dateSet.add(todayStr);
+
+      // Continuous Calendar Date Range Generation:
+      // Find the earliest recorded date (or at least 7 days before today)
+      let earliestDate = todayStr;
+      for (const d of dateSet) {
+        if (d && d < earliestDate) earliestDate = d;
+      }
+
+      // Fill in all continuous calendar dates from earliestDate up to todayStr
+      let cursor = earliestDate;
+      let iterations = 0;
+      while (cursor <= todayStr && iterations < 90) {
+        dateSet.add(cursor);
+        cursor = getNextISTDateString(cursor);
+        iterations++;
+      }
 
       const currentSession = getMealSession();
 
@@ -596,8 +612,10 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
         const kitchenTotalPlates = kitchenBreakfastCount + kitchenLunchCount + kitchenDinnerCount;
 
         // Cycle Status
-        let cycleStatus: 'Upcoming' | 'In Progress' | 'Completed' = 'Upcoming';
-        if (date > todayStr) {
+        let cycleStatus: 'Upcoming' | 'In Progress' | 'Completed' | 'No Stay Cohort' = 'Upcoming';
+        if (totalEligible === 0 && date !== todayStr) {
+          cycleStatus = 'No Stay Cohort';
+        } else if (date > todayStr) {
           cycleStatus = 'Upcoming';
         } else if (date === todayStr) {
           cycleStatus = 'In Progress';
@@ -609,10 +627,16 @@ export async function getDatewiseFoodLogs(): Promise<DatewiseLogSummary[]> {
           cycleStatus = 'Completed';
         }
 
+        const listStatus: 'Draft' | 'Finalized' | 'No Stay' = list?.status === 'Finalized'
+          ? 'Finalized'
+          : (list?.status === 'Draft' || totalEligible > 0)
+          ? 'Draft'
+          : 'No Stay';
+
         return {
           date,
           nextDate,
-          status: list?.status === 'Finalized' ? 'Finalized' : 'Draft',
+          status: listStatus,
           cycleStatus,
           finalizedBy: list?.finalizedBy || null,
           finalizedAt: list?.finalizedAt ? new Date(list.finalizedAt).toLocaleString('en-IN') : null,
@@ -704,16 +728,19 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
             issued: Boolean(dToken),
             tokenNumber: dToken?.tokenNumber,
             time: dToken?.issuedAt ? formatISTTime(dToken.issuedAt) : undefined,
+            date: dToken?.date || date,
           },
           breakfast: {
             issued: Boolean(bToken),
             tokenNumber: bToken?.tokenNumber,
             time: bToken?.issuedAt ? formatISTTime(bToken.issuedAt) : undefined,
+            date: bToken?.date || nextDate,
           },
           lunch: {
             issued: Boolean(lToken),
             tokenNumber: lToken?.tokenNumber,
             time: lToken?.issuedAt ? formatISTTime(lToken.issuedAt) : undefined,
+            date: lToken?.date || nextDate,
           },
           mealsClaimed,
         };
@@ -747,16 +774,19 @@ export async function getNightStayBatchAudit(dateInput: string): Promise<NightSt
             issued: Boolean(dToken),
             tokenNumber: dToken?.tokenNumber,
             time: dToken?.issuedAt ? formatISTTime(dToken.issuedAt) : undefined,
+            date: dToken?.date || date,
           },
           breakfast: {
             issued: Boolean(bToken),
             tokenNumber: bToken?.tokenNumber,
             time: bToken?.issuedAt ? formatISTTime(bToken.issuedAt) : undefined,
+            date: bToken?.date || nextDate,
           },
           lunch: {
             issued: Boolean(lToken),
             tokenNumber: lToken?.tokenNumber,
             time: lToken?.issuedAt ? formatISTTime(lToken.issuedAt) : undefined,
+            date: lToken?.date || nextDate,
           },
           mealsClaimed,
         });

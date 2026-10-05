@@ -20,11 +20,10 @@ import {
   type DatewiseLogSummary,
   type NightStayBatchAuditDetails,
 } from '@/actions/foodListActions';
-import { getFoodTokens } from '@/actions/tokenActions';
 import { getStudents, getProjects, getDashboardBundle, type StudentRecord, type ProjectRecord } from '@/actions/studentActions';
 import { getTodayISTDateString, getNextISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
 
-type ActiveTab = 'list' | 'tokens' | 'logs';
+type ActiveTab = 'list' | 'logs';
 
 interface CachedDailyFoodListPayload {
   date: string;
@@ -167,8 +166,7 @@ function DailyFoodListContent() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam === 'tokens') return 'tokens';
-    if (tabParam === 'logs') return 'logs';
+    if (tabParam === 'logs' || tabParam === 'tokens') return 'logs';
     return 'list';
   });
 
@@ -180,12 +178,7 @@ function DailyFoodListContent() {
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Tokens state
-  const [tokens, setTokens] = useState<any[]>(() => initialData.tokens);
-  const [tokensLoading, setTokensLoading] = useState(false);
-  const [tokenSearch, setTokenSearch] = useState('');
-  const [tokenDateFilter, setTokenDateFilter] = useState<string>(initialDate);
-  const [tokenSessionFilter, setTokenSessionFilter] = useState('ALL');
+  // Print Slip & Modal states
   const [selectedPrintToken, setSelectedPrintToken] = useState<TokenPrintData | null>(null);
   const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
@@ -193,6 +186,7 @@ function DailyFoodListContent() {
 
   // Datewise logs state
   const [datewiseLogs, setDatewiseLogs] = useState<DatewiseLogSummary[]>([]);
+  const [logsFilterMode, setLogsFilterMode] = useState<'all' | 'active'>('all');
   const [logsLoading, setLogsLoading] = useState(false);
   const [selectedBatchAudit, setSelectedBatchAudit] = useState<NightStayBatchAuditDetails | null>(null);
   const [batchAuditLoading, setBatchAuditLoading] = useState(false);
@@ -384,20 +378,6 @@ function DailyFoodListContent() {
     }
   }, []);
 
-  // Load Tokens data
-  const loadTokens = useCallback(async (date?: string) => {
-    setTokensLoading(true);
-    try {
-      const data = await getFoodTokens(date || undefined);
-      globalTokensCache = data;
-      setTokens(data);
-    } catch (e) {
-      console.error('Error fetching tokens:', e);
-    } finally {
-      setTokensLoading(false);
-    }
-  }, []);
-
   // Load Datewise Logs data
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
@@ -447,9 +427,6 @@ function DailyFoodListContent() {
       window.history.replaceState(null, '', newUrl);
     }
 
-    // Automatically sync tokens subtab date filter to active working date
-    setTokenDateFilter(selectedDate);
-
     const hasCached = globalDateCache.has(selectedDate);
     if (hasCached) {
       const cached = globalDateCache.get(selectedDate)!;
@@ -460,12 +437,6 @@ function DailyFoodListContent() {
       loadData(selectedDate, false);
     }
   }, [selectedDate, todayStr, loadData]);
-
-  useEffect(() => {
-    if (activeTab === 'tokens') {
-      loadTokens(tokenDateFilter);
-    }
-  }, [activeTab, tokenDateFilter, loadTokens]);
 
   useEffect(() => {
     if (activeTab === 'logs') {
@@ -755,13 +726,6 @@ function DailyFoodListContent() {
     setFoodListPage(1);
   }, [selectedDate, foodListSearch]);
 
-  const [tokensPage, setTokensPage] = useState(1);
-  const TOKENS_PAGE_SIZE = 10;
-
-  useEffect(() => {
-    setTokensPage(1);
-  }, [tokenSearch, tokenDateFilter, tokenSessionFilter]);
-
   // Instant in-memory search for Daily Food List across all fields (<0.5ms)
   const filteredFoodListEntries = useMemo(() => {
     const raw = currentList?.entries || [];
@@ -789,25 +753,13 @@ function DailyFoodListContent() {
     return [1, '...', current - 1, current, current + 1, '...', total];
   };
 
-  // Filtered tokens
-  const filteredTokens = tokens.filter(t => {
-    const q = tokenSearch.trim().toLowerCase();
-    const matchSearch =
-      !q ||
-      t.tokenNumber?.toLowerCase().includes(q) ||
-      t.studentId?.toLowerCase().includes(q) ||
-      t.studentName?.toLowerCase().includes(q) ||
-      t.project?.toLowerCase().includes(q);
-
-    const matchSession =
-      tokenSessionFilter === 'ALL' || (t.session || '').toUpperCase() === tokenSessionFilter;
-
-    return matchSearch && matchSession;
-  });
-
-  const tokensTotalPages = Math.ceil(filteredTokens.length / TOKENS_PAGE_SIZE) || 1;
-  const tokensStartIndex = (tokensPage - 1) * TOKENS_PAGE_SIZE;
-  const paginatedTokens = filteredTokens.slice(tokensStartIndex, tokensStartIndex + TOKENS_PAGE_SIZE);
+  // Filtered datewise logs (All continuous calendar dates vs Only shifts with students)
+  const displayedLogs = useMemo(() => {
+    if (logsFilterMode === 'active') {
+      return datewiseLogs.filter(l => l.totalEligible > 0 || l.date === todayStr);
+    }
+    return datewiseLogs;
+  }, [datewiseLogs, logsFilterMode, todayStr]);
 
   return (
     <div className="space-y-6">
@@ -856,52 +808,37 @@ function DailyFoodListContent() {
               <span>Printer Settings</span>
             </button>
 
-            {/* Segmented Subtab Switcher */}
+            {/* Segmented Subtab Switcher (Consolidated 2 Tabs) */}
             <div className="inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80">
-            <button
-              onClick={() => switchTab('list')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'list'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span>▤</span>
-              <span>Daily Food List</span>
-              {currentList && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-50 text-indigo-700">
-                  {currentList.entries.length}
-                </span>
-              )}
-            </button>
+              <button
+                onClick={() => switchTab('list')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'list'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>▤</span>
+                <span>Daily Food List</span>
+                {currentList && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-50 text-indigo-700">
+                    {currentList.entries.length}
+                  </span>
+                )}
+              </button>
 
-            <button
-              onClick={() => switchTab('tokens')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'tokens'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span>▣</span>
-              <span>Food Tokens</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 text-slate-700">
-                {tokens.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => switchTab('logs')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'logs'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span>📅</span>
-              <span>Datewise Logs</span>
-            </button>
-          </div>
+              <button
+                onClick={() => switchTab('logs')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'logs'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>📊</span>
+                <span>Datewise Logs &amp; Token Audit</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1259,224 +1196,7 @@ function DailyFoodListContent() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: ISSUED FOOD TOKENS (WITH REALTIME FILTER, SEARCH & THERMAL PRINT)   */}
-      {/* ========================================================================= */}
-      {activeTab === 'tokens' && (
-        <div className="space-y-5">
-          {/* Filters Bar */}
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                value={tokenSearch}
-                onChange={e => setTokenSearch(e.target.value)}
-                placeholder="Search token #, roll no, name, project…"
-                className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64 bg-white"
-              />
-
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  value={tokenDateFilter}
-                  onChange={e => setTokenDateFilter(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                />
-                {tokenDateFilter && (
-                  <button
-                    onClick={() => setTokenDateFilter('')}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1.5 cursor-pointer font-medium"
-                  >
-                    Show All Dates
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Session Filter */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs">
-                {(['ALL', 'BREAKFAST', 'LUNCH', 'DINNER'] as const).map(sess => (
-                  <button
-                    key={sess}
-                    onClick={() => setTokenSessionFilter(sess)}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
-                      tokenSessionFilter === sess
-                        ? 'bg-white text-indigo-700 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {sess === 'ALL' ? 'All Sessions' : sess}
-                  </button>
-                ))}
-              </div>
-
-              {/* Export Tokens CSV Button */}
-              <a
-                href={`/api/reports/export?type=tokens&date=${tokenDateFilter || 'all'}&session=${tokenSessionFilter}&format=csv`}
-                download
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer shadow-xs"
-                title="Export token audit CSV cleanly formatted for Excel"
-              >
-                <span>📥</span>
-                <span>Export CSV</span>
-              </a>
-            </div>
-          </div>
-
-          {/* Tokens Count & Table */}
-          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-800">
-                {filteredTokens.length} Token{filteredTokens.length !== 1 ? 's' : ''} Generated
-                {tokenDateFilter ? ` for ${formatISTDateDMY(tokenDateFilter)}` : ' (All Dates)'}
-              </h3>
-              <span className="text-xs text-slate-400">
-                Sorted by most recent issue time
-              </span>
-            </div>
-
-            {tokensLoading ? (
-              <div className="py-16 text-center text-slate-400 text-sm">
-                <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-2"></div>
-                Loading tokens...
-              </div>
-            ) : filteredTokens.length === 0 ? (
-              <div className="py-16 text-center">
-                <div className="text-3xl mb-3">🎫</div>
-                <div className="font-medium text-slate-700">No food tokens found</div>
-                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  No tokens have been issued matching the selected date and filters. Scan student ID cards at the mess terminal to issue tokens.
-                </p>
-              </div>
-            ) : (
-              <div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      <tr>
-                        <th className="px-3 py-3 text-center w-14">S.No</th>
-                        <th className="px-4 py-3">Token Number</th>
-                        <th className="px-4 py-3">Student Name</th>
-                        <th className="px-4 py-3">Roll No / ID</th>
-                        <th className="px-4 py-3">Dept & Year</th>
-                        <th className="px-4 py-3">Project</th>
-                        <th className="px-4 py-3">Session</th>
-                        <th className="px-4 py-3">Date & Time</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {paginatedTokens.map((t, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="px-3 py-3 text-center text-xs text-slate-500 font-medium">
-                            {tokensStartIndex + idx + 1}
-                          </td>
-                          <td className="px-4 py-3 font-mono font-bold text-indigo-700 text-xs">
-                            {t.tokenNumber}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-slate-900">
-                            {t.studentName}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                            {t.studentId}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">
-                            {t.department} {t.year ? `· ${t.year}` : ''}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-                              {t.project}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase ${
-                                (t.session || '').toLowerCase().includes('breakfast')
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : (t.session || '').toLowerCase().includes('lunch')
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-indigo-100 text-indigo-800'
-                              }`}
-                            >
-                              {t.session}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-slate-500">
-                            {formatISTDateDMY(t.date)} · {formatISTTime(t.issuedAt || t.time)}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              onClick={() => {
-                                setSelectedPrintToken({
-                                  tokenNumber: t.tokenNumber,
-                                  studentId: t.studentId,
-                                  studentName: t.studentName,
-                                  project: t.project,
-                                  date: t.date,
-                                  time: t.time || t.issuedAt,
-                                  session: t.session,
-                                });
-                                setIsSlipModalOpen(true);
-                              }}
-                              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
-                            >
-                              View Slip
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Tab 2 Pagination Controls */}
-                {filteredTokens.length > 0 && (
-                  <div className="px-5 py-3.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50/50">
-                    <div>
-                      Showing <span className="font-semibold text-slate-800">{filteredTokens.length > 0 ? tokensStartIndex + 1 : 0}</span> to{' '}
-                      <span className="font-semibold text-slate-800">{Math.min(tokensStartIndex + TOKENS_PAGE_SIZE, filteredTokens.length)}</span> of{' '}
-                      <span className="font-semibold text-slate-800">{filteredTokens.length}</span> tokens
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        disabled={tokensPage === 1}
-                        onClick={() => setTokensPage(p => Math.max(1, p - 1))}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
-                      >
-                        ← Previous
-                      </button>
-                      <div className="flex items-center gap-1">
-                        {Array.from({ length: tokensTotalPages }, (_, i) => i + 1).map(p => (
-                          <button
-                            key={p}
-                            onClick={() => setTokensPage(p)}
-                            className={`w-7 h-7 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                              tokensPage === p
-                                ? 'bg-indigo-700 text-white shadow-xs'
-                                : 'text-slate-600 hover:bg-slate-200/70'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        disabled={tokensPage === tokensTotalPages}
-                        onClick={() => setTokensPage(p => Math.min(tokensTotalPages, p + 1))}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-700 transition-colors cursor-pointer"
-                      >
-                        Next →
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 3: DATEWISE HISTORICAL LOGS & AUDIT                                   */}
+      {/* TAB 2: DATEWISE HISTORICAL LOGS & AUDIT (CONTINUOUS CALENDAR TIMELINE)     */}
       {/* ========================================================================= */}
       {activeTab === 'logs' && (
         <div className="space-y-5">
@@ -1491,8 +1211,33 @@ function DailyFoodListContent() {
               </p>
             </div>
 
-            {/* Actions */}
+            {/* Actions & Filters */}
             <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex p-0.5 bg-slate-100 rounded-lg border border-slate-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setLogsFilterMode('all')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    logsFilterMode === 'all'
+                      ? 'bg-white text-indigo-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogsFilterMode('active')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    logsFilterMode === 'active'
+                      ? 'bg-white text-indigo-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Active Shifts Only
+                </button>
+              </div>
+
               <button
                 onClick={loadLogs}
                 className="px-3 py-1.5 text-xs font-medium border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
@@ -1526,7 +1271,6 @@ function DailyFoodListContent() {
                 </p>
               </div>
             ) : (
-              /* NIGHT-STAY COHORT AUDIT (DINNER -> BREAKFAST -> LUNCH) */
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -1542,7 +1286,7 @@ function DailyFoodListContent() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {datewiseLogs.map((log, idx) => (
+                    {displayedLogs.map((log, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                         <td className="px-4 py-3 font-semibold text-slate-900 text-sm">
                           <div className="flex items-center gap-1.5">
@@ -1564,54 +1308,76 @@ function DailyFoodListContent() {
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                 : log.cycleStatus === 'In Progress'
                                 ? 'bg-amber-50 text-amber-800 border border-amber-200 animate-pulse'
+                                : log.cycleStatus === 'No Stay Cohort'
+                                ? 'bg-slate-100 text-slate-500 border border-slate-200 font-medium'
                                 : 'bg-slate-100 text-slate-600 border border-slate-200'
                             }`}
                           >
-                            {log.cycleStatus}
+                            {log.cycleStatus === 'No Stay Cohort' ? 'No Stay Shift' : log.cycleStatus}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center font-mono font-bold text-slate-800">
                           {log.totalEligible}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="px-2 py-1 rounded bg-purple-50 text-purple-900 border border-purple-200 text-xs font-semibold font-mono">
-                            {log.dinnerCount} / {log.totalEligible}
-                          </span>
+                          {log.totalEligible > 0 ? (
+                            <span className="px-2 py-1 rounded bg-purple-50 text-purple-900 border border-purple-200 text-xs font-semibold font-mono">
+                              {log.dinnerCount} / {log.totalEligible}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="px-2 py-1 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs font-semibold font-mono">
-                            {log.breakfastCount} / {log.totalEligible}
-                          </span>
+                          {log.totalEligible > 0 ? (
+                            <span className="px-2 py-1 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs font-semibold font-mono">
+                              {log.breakfastCount} / {log.totalEligible}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="px-2 py-1 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-semibold font-mono">
-                            {log.lunchCount} / {log.totalEligible}
-                          </span>
+                          {log.totalEligible > 0 ? (
+                            <span className="px-2 py-1 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-semibold font-mono">
+                              {log.lunchCount} / {log.totalEligible}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="w-20 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                              <div
-                                className="bg-indigo-600 h-2 rounded-full transition-all"
-                                style={{ width: `${Math.min(100, log.turnoutPercentage)}%` }}
-                              />
+                          {log.totalEligible > 0 ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-20 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+                                <div
+                                  className="bg-indigo-600 h-2 rounded-full transition-all"
+                                  style={{ width: `${Math.min(100, log.turnoutPercentage)}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-bold text-slate-800">
+                                {log.turnoutPercentage}%
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                ({log.totalMealsServed}/{log.maxPossibleMeals})
+                              </span>
                             </div>
-                            <span className="text-xs font-bold text-slate-800">
-                              {log.turnoutPercentage}%
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              ({log.totalMealsServed}/{log.maxPossibleMeals})
-                            </span>
-                          </div>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
                             type="button"
                             onClick={() => openBatchAudit(log.date)}
-                            className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded-lg border border-indigo-200 transition-colors cursor-pointer inline-flex items-center gap-1 shadow-2xs"
+                            className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors cursor-pointer inline-flex items-center gap-1 shadow-2xs ${
+                              log.totalEligible > 0
+                                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 font-medium'
+                            }`}
                           >
                             <span>📋</span>
-                            <span>Batch Audit</span>
+                            <span>{log.totalEligible > 0 ? 'Batch Audit' : 'Audit (0)'}</span>
                           </button>
                         </td>
                       </tr>
@@ -1726,30 +1492,99 @@ function DailyFoodListContent() {
                             <td className="px-3 py-2.5 font-mono text-indigo-700">{st.projectCode}</td>
                             <td className="px-3 py-2.5 text-center">
                               {st.dinner.issued ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-semibold text-[11px]">
-                                  <span>✓</span>
-                                  <span>{st.dinner.time || 'Claimed'}</span>
-                                </span>
+                                <div className="inline-flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-semibold text-[11px]">
+                                    <span>✓</span>
+                                    <span>{st.dinner.time || 'Claimed'}</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedPrintToken({
+                                        tokenNumber: st.dinner.tokenNumber || `INC-${st.studentId}-DIN`,
+                                        studentId: st.studentId,
+                                        studentName: st.studentName,
+                                        department: st.department,
+                                        year: st.year,
+                                        project: st.projectCode,
+                                        date: st.dinner.date || selectedBatchAudit.date,
+                                        time: st.dinner.time || '08:00 PM',
+                                        session: 'DINNER',
+                                      });
+                                      setIsSlipModalOpen(true);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors cursor-pointer"
+                                    title={`View & Print Thermal Slip (#${st.dinner.tokenNumber || ''})`}
+                                  >
+                                    🧾
+                                  </button>
+                                </div>
                               ) : (
                                 <span className="text-slate-400 font-mono">—</span>
                               )}
                             </td>
                             <td className="px-3 py-2.5 text-center">
                               {st.breakfast.issued ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold text-[11px]">
-                                  <span>✓</span>
-                                  <span>{st.breakfast.time || 'Claimed'}</span>
-                                </span>
+                                <div className="inline-flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold text-[11px]">
+                                    <span>✓</span>
+                                    <span>{st.breakfast.time || 'Claimed'}</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedPrintToken({
+                                        tokenNumber: st.breakfast.tokenNumber || `INC-${st.studentId}-BRK`,
+                                        studentId: st.studentId,
+                                        studentName: st.studentName,
+                                        department: st.department,
+                                        year: st.year,
+                                        project: st.projectCode,
+                                        date: st.breakfast.date || selectedBatchAudit.nextDate,
+                                        time: st.breakfast.time || '08:00 AM',
+                                        session: 'BREAKFAST',
+                                      });
+                                      setIsSlipModalOpen(true);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors cursor-pointer"
+                                    title={`View & Print Thermal Slip (#${st.breakfast.tokenNumber || ''})`}
+                                  >
+                                    🧾
+                                  </button>
+                                </div>
                               ) : (
                                 <span className="text-slate-400 font-mono">—</span>
                               )}
                             </td>
                             <td className="px-3 py-2.5 text-center">
                               {st.lunch.issued ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold text-[11px]">
-                                  <span>✓</span>
-                                  <span>{st.lunch.time || 'Claimed'}</span>
-                                </span>
+                                <div className="inline-flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold text-[11px]">
+                                    <span>✓</span>
+                                    <span>{st.lunch.time || 'Claimed'}</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedPrintToken({
+                                        tokenNumber: st.lunch.tokenNumber || `INC-${st.studentId}-LUN`,
+                                        studentId: st.studentId,
+                                        studentName: st.studentName,
+                                        department: st.department,
+                                        year: st.year,
+                                        project: st.projectCode,
+                                        date: st.lunch.date || selectedBatchAudit.nextDate,
+                                        time: st.lunch.time || '12:30 PM',
+                                        session: 'LUNCH',
+                                      });
+                                      setIsSlipModalOpen(true);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors cursor-pointer"
+                                    title={`View & Print Thermal Slip (#${st.lunch.tokenNumber || ''})`}
+                                  >
+                                    🧾
+                                  </button>
+                                </div>
                               ) : (
                                 <span className="text-slate-400 font-mono">—</span>
                               )}
