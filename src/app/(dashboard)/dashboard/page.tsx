@@ -614,18 +614,20 @@ export default function Dashboard() {
               >
                 <div>
                   {/* Top Bar: Icon, Name, Day Badge, and Status Badge */}
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-2xl shrink-0">{meal.icon}</span>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h4 className="font-bold text-slate-900 text-base tracking-tight">{meal.name}</h4>
-                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/60 px-1.5 py-0.5 rounded whitespace-nowrap">
-                          {meal.dayBadge}
-                        </span>
+                  <div className="flex items-start justify-between gap-2.5 mb-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-2xl shrink-0 leading-none">{meal.icon}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-slate-900 text-base tracking-tight">{meal.name}</h4>
+                          <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/60 px-1.5 py-0.5 rounded whitespace-nowrap">
+                            {meal.dayBadge}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="shrink-0">
+                    <div className="shrink-0 pt-0.5">
                       {isCurrent ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-900 border border-emerald-300 animate-pulse whitespace-nowrap">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
@@ -633,11 +635,11 @@ export default function Dashboard() {
                         </span>
                       ) : isCompleted ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-300 whitespace-nowrap">
-                          ✓ {meal.statusLabel || 'Completed'}
+                          ✓ {meal.statusLabel?.toLowerCase().includes('closed') ? 'Closed' : 'Completed'}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
-                          ⏳ {meal.statusLabel || 'Upcoming'}
+                          ⏳ Upcoming
                         </span>
                       )}
                     </div>
@@ -707,7 +709,11 @@ export default function Dashboard() {
                     {meal.isFutureScheduled ? `${meal.approved} eligible for tomorrow` : (meal.pending > 0 ? `${meal.pending} unclaimed` : 'All cleared ✓')}
                   </span>
                   <span className="text-slate-400 font-mono text-[10px]">
-                    {meal.lastTime ? `Last: ${formatISTTime(meal.lastTime)}` : (meal.isFutureScheduled ? 'Opens tomorrow' : 'No tokens yet')}
+                    {meal.lastTime
+                      ? `Last: ${formatISTTime(meal.lastTime)}`
+                      : (meal.statusLabel?.toLowerCase().startsWith('opens')
+                          ? meal.statusLabel
+                          : (meal.isFutureScheduled ? 'Opens tomorrow' : 'No tokens yet'))}
                   </span>
                 </div>
               </div>
