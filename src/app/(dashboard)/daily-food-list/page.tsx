@@ -732,7 +732,8 @@ function DailyFoodListContent() {
       return;
     }
 
-    const defaultCode = foundStudent.category === 'Intern' ? 'GEN-INTERN' : (selectedMentor || foundStudent.mentorCode || 'GEN-INTERN');
+    const isIntern = foundStudent.category === 'Intern' || foundStudent.courseType === 'Intern' || foundStudent.id.startsWith('INT-');
+    const defaultCode = foundStudent.mentorId || foundStudent.mentorCode || undefined;
     const res = await addStudentToDailyList(selectedDate, foundStudent.id, defaultCode);
     if (res.success) {
       showToast(res.message);
@@ -1745,48 +1746,51 @@ function DailyFoodListContent() {
               </div>
             )}
 
-            {foundStudent && foundStudent !== 'not-found' && (
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-slate-900 text-sm">{foundStudent.name}</div>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      foundStudent.category === 'Intern'
-                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                        : 'bg-indigo-100 text-indigo-900 border border-indigo-200'
-                    }`}
-                  >
-                    {foundStudent.category === 'Intern' ? '💼 STARTUP INTERN' : '🎓 STUDENT'}
-                  </span>
-                </div>
+            {foundStudent && foundStudent !== 'not-found' && (() => {
+              const isIntern = foundStudent.category === 'Intern' || foundStudent.courseType === 'Intern' || foundStudent.id.startsWith('INT-');
+              return (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold text-slate-900 text-sm">{foundStudent.name}</div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isIntern
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                      }`}
+                    >
+                      {isIntern ? '💼 STARTUP INTERN' : '🎓 STUDENT'}
+                    </span>
+                  </div>
 
-                <div className="text-slate-600 font-mono text-xs">
-                  ID: <span className="font-bold text-indigo-700">{foundStudent.id}</span>
-                  {foundStudent.category === 'Intern' ? (
-                    <span className="ml-2 text-slate-500">
-                      | Startup: <strong className="text-slate-800">{foundStudent.startupName || foundStudent.department}</strong>
-                    </span>
-                  ) : (
-                    <span className="ml-2 text-slate-500">
-                      | {foundStudent.department} · Yr {foundStudent.year}
-                    </span>
+                  <div className="text-slate-600 font-mono text-xs">
+                    ID: <span className="font-bold text-indigo-700">{foundStudent.id}</span>
+                    {isIntern ? (
+                      <span className="ml-2 text-slate-500">
+                        | Startup: <strong className="text-slate-800">{foundStudent.startupName || foundStudent.department}</strong>
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-slate-500">
+                        | {foundStudent.department} · Yr {foundStudent.year}
+                      </span>
+                    )}
+                  </div>
+
+                  {foundStudent.phone && (
+                    <div className="text-slate-500 text-[11px]">
+                      Mobile: {foundStudent.phone}
+                    </div>
+                  )}
+
+                  {foundStudent.mentorName && (
+                    <div className="text-slate-600 text-xs bg-white p-2 rounded-lg border border-slate-200">
+                      <span className="font-medium text-slate-500">Assigned Mentor: </span>
+                      <strong className="text-slate-800">{foundStudent.mentorName}</strong>
+                    </div>
                   )}
                 </div>
-
-                {foundStudent.phone && (
-                  <div className="text-slate-500 text-[11px]">
-                    Mobile: {foundStudent.phone}
-                  </div>
-                )}
-
-                {foundStudent.mentorName && (
-                  <div className="text-slate-600 text-xs bg-white p-2 rounded-lg border border-slate-200">
-                    <span className="font-medium text-slate-500">Assigned Mentor: </span>
-                    <strong className="text-slate-800">{foundStudent.mentorName}</strong>
-                  </div>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex justify-end gap-2.5 pt-2">
               <button

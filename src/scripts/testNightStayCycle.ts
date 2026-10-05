@@ -31,26 +31,16 @@ async function runNightStaySimulation() {
   await resetTestTokens(dayD, studentId);
   await resetTestTokens(dayDPlus1, studentId);
 
-  const project = await prisma.project.findFirst();
-  if (!project) {
-    await prisma.project.create({
-      data: {
-        code: 'PRJ-NIGHT',
-        name: 'Autonomous Systems & Drone Incubation',
-        status: 'Active',
-      },
-    });
-  }
-  const validProjectCode = project ? project.code : 'PRJ-NIGHT';
+  const mentor = await prisma.mentor.findFirst();
 
   // 3. Ensure student is eligible on Day D (Night-stay list)
   await prisma.dailyFoodEligibility.upsert({
     where: { date_studentId: { date: dayD, studentId } },
-    update: { status: 'Eligible', projectCode: validProjectCode },
+    update: { status: 'Eligible', mentorId: mentor?.id || null },
     create: {
       date: dayD,
       studentId,
-      projectCode: validProjectCode,
+      mentorId: mentor?.id || null,
       status: 'Eligible',
       addedBy: 'Test Runner',
     },

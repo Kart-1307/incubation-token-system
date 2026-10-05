@@ -250,7 +250,7 @@ export default function Students() {
           setFormError(mRes.message || 'Error creating new mentor.');
           return;
         }
-        resolvedMentorCode = mRes.mentor.code;
+        resolvedMentorCode = mRes.mentor.id || mRes.mentor.code;
       } catch (err: any) {
         setFormError(err?.message || 'Failed to create mentor.');
         return;
@@ -307,7 +307,7 @@ export default function Students() {
         email: form.email,
         phone: form.phone,
         status: form.status,
-        mentorCode: resolvedMentorCode,
+        mentorId: resolvedMentorCode,
       });
 
       if (res.success) {
@@ -430,7 +430,7 @@ export default function Students() {
           setIsSavingEdit(false);
           return;
         }
-        resolvedEditMentorCode = mRes.mentor.code;
+        resolvedEditMentorCode = mRes.mentor.id || mRes.mentor.code;
       } catch (err: any) {
         setEditFormError(err?.message || 'Failed to create mentor.');
         setIsSavingEdit(false);
@@ -447,7 +447,7 @@ export default function Students() {
         email: editForm.email || (isIntern ? `intern.${studentToEdit.id.toLowerCase()}@incubation.local` : ''),
         phone: editForm.phone || null,
         status: editForm.status,
-        mentorCode: resolvedEditMentorCode,
+        mentorId: resolvedEditMentorCode,
       });
 
       if (res.success && res.student) {
@@ -703,9 +703,9 @@ export default function Students() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {mentorList.map(m => {
-                  const assignedCount = studentList.filter(s => s.mentorCode === m.code || s.mentorName === m.name).length;
+                  const assignedCount = studentList.filter(s => s.mentorId === m.id || s.mentorCode === (m.id || m.code) || s.mentorName === m.name).length;
                   return (
-                    <div key={m.code} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                    <div key={m.id || m.code} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <h4 className="font-bold text-slate-900 text-sm">{m.name}</h4>
@@ -715,8 +715,8 @@ export default function Students() {
                           {assignedCount} Mentees
                         </span>
                       </div>
-                      <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-400 font-mono">
-                        <span>{m.code}</span>
+                      <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500">
+                        <span className="font-medium text-slate-600">{m.designation || 'Faculty Mentor'}</span>
                         <span className="text-emerald-700 font-semibold font-sans">Active</span>
                       </div>
                     </div>
@@ -1094,7 +1094,7 @@ export default function Students() {
                       >
                         <option value="">Unassigned (Default)</option>
                         {mentorList.map(m => (
-                          <option key={m.code} value={m.code}>
+                          <option key={m.id || m.code} value={m.id || m.code}>
                             {m.name} ({m.department})
                           </option>
                         ))}
@@ -1246,7 +1246,7 @@ export default function Students() {
                       >
                         <option value="">Unassigned (Default)</option>
                         {mentorList.map(m => (
-                          <option key={m.code} value={m.code}>
+                          <option key={m.id || m.code} value={m.id || m.code}>
                             {m.name} ({m.department})
                           </option>
                         ))}
@@ -1539,7 +1539,7 @@ export default function Students() {
                   >
                     <option value="UNASSIGNED">Unassigned</option>
                     {mentorList.map(m => (
-                      <option key={m.code} value={m.code}>
+                      <option key={m.id || m.code} value={m.id || m.code}>
                         {m.name} ({m.department})
                       </option>
                     ))}

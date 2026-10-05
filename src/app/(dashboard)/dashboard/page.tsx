@@ -794,8 +794,8 @@ export default function Dashboard() {
           {/* Incubation Projects Breakdown */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-slate-800 text-sm">Project Breakdown</h3>
-              <Link href="/projects" className="text-xs text-indigo-600 hover:underline">View all</Link>
+              <h3 className="font-bold text-slate-800 text-sm">Mentors &amp; Cohorts Breakdown</h3>
+              <Link href="/students" className="text-xs text-indigo-600 hover:underline">View all</Link>
             </div>
 
             <div className="space-y-3">
@@ -879,7 +879,7 @@ export default function Dashboard() {
                     <th className="text-center py-2.5 px-3 font-semibold w-12">S.No</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Token No</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Student</th>
-                    <th className="text-left py-2.5 pr-3 font-semibold">Project</th>
+                    <th className="text-left py-2.5 pr-3 font-semibold">Mentor / Cohort</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Session & Time</th>
                     <th className="text-left py-2.5 pr-3 font-semibold">Status</th>
                     <th className="text-right py-2.5 pl-3 font-semibold">Details</th>

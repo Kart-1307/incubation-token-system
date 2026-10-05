@@ -17,7 +17,6 @@ export async function GET(req: NextRequest) {
       where: { date },
     });
 
-    // If count hasn't changed and knownCount was provided, return 304/unchanged payload immediately
     if (knownCount >= 0 && currentCount === knownCount) {
       return NextResponse.json({
         changed: false,
@@ -36,22 +35,27 @@ export async function GET(req: NextRequest) {
         where: { date },
         include: {
           student: true,
-          project: true,
+          mentor: true,
         },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
 
-    const entries = eligibilities.map((e: any) => ({
-      studentId: e.studentId,
-      studentName: e.student?.name || e.studentId,
-      department: normalizeDepartmentName(e.student?.department),
-      year: e.student?.year || 0,
-      projectCode: e.projectCode,
-      projectName: e.project?.name || e.projectCode,
-      addedBy: e.addedBy || 'Staff',
-      status: e.status || 'Eligible',
-    }));
+    const entries = eligibilities.map((e: any) => {
+      const mentorName = e.mentor?.name || 'Unassigned';
+      return {
+        studentId: e.studentId,
+        studentName: e.student?.name || e.studentId,
+        department: normalizeDepartmentName(e.student?.department),
+        year: e.student?.year || 0,
+        mentorId: e.mentorId || 'UNASSIGNED',
+        mentorName,
+        projectCode: e.mentorId || 'UNASSIGNED',
+        projectName: mentorName,
+        addedBy: e.addedBy || 'Staff',
+        status: e.status || 'Eligible',
+      };
+    });
 
     return NextResponse.json({
       changed: true,

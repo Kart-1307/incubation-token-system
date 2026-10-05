@@ -1,5 +1,4 @@
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
 
 // Default Institutional Seed Data
 const initialStaff = [
@@ -8,46 +7,71 @@ const initialStaff = [
     username: 'staff',
     email: 'incubation@sairam.edu.in',
     name: 'Incubation Centre Staff',
-    // bcrypt hash of 'Sairam@123'
     passwordHash: '$2b$10$w09ZkZ7pZ1j3iI2/zD386uvLhHkJgQ0eCgG0nK3zR87m1oZ5l1u4u',
     createdAt: new Date(),
     updatedAt: new Date(),
   },
 ];
 
-const initialProjects = [
-  { code: 'AGRI-01', name: 'AgriCheck', description: 'AI-powered crop disease detection system for small-scale farmers.', status: 'Active', createdAt: new Date('2025-07-15'), updatedAt: new Date() },
-  { code: 'SMRT-02', name: 'Smart Campus', description: 'IoT-based campus resource management and monitoring.', status: 'Active', createdAt: new Date('2025-08-01'), updatedAt: new Date() },
-  { code: 'HLTH-03', name: 'HealthTrack', description: 'Student health monitoring and wellness tracking application.', status: 'Active', createdAt: new Date('2025-08-20'), updatedAt: new Date() },
-  { code: 'ECO-04', name: 'EcoMonitor', description: 'Environmental quality sensor network and data visualization.', status: 'Active', createdAt: new Date('2025-09-05'), updatedAt: new Date() },
+const initialMentors = [
+  {
+    id: 'b109a501-0000-4000-8000-000000000001',
+    name: 'Biogas Plant Mentor',
+    department: 'ECE / Incubation',
+    designation: 'Faculty Mentor',
+    status: 'Active',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
 ];
 
 const initialStudents = [
-  { id: '23CS101', name: 'Siddharth V', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'siddharth@college.edu', phone: '9876543210', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS102', name: 'Fayas K', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'fayas@college.edu', phone: '9876543211', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS103', name: 'Nirmal E', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'nirmal@college.edu', phone: '9876543212', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS104', name: 'Arun Kumar', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'arun@college.edu', phone: '9876543213', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23CS105', name: 'Priya S', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 3, email: 'priya@college.edu', phone: '9876543214', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23ME101', name: 'Rahul M', department: 'Mechanical Engineering', courseType: 'Bachelor', year: 2, email: 'rahul@college.edu', phone: '9876543215', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '23EC101', name: 'Kavya R', department: 'Electronics and Communication Engineering', courseType: 'Bachelor', year: 2, email: 'kavya@college.edu', phone: '9876543216', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-  { id: '22CS201', name: 'Deepak N', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 4, email: 'deepak@college.edu', phone: '9876543217', status: 'Inactive', createdAt: new Date(), updatedAt: new Date() },
-  { id: 'SEC24CS110', name: 'Karthikeyan S', department: 'Computer Science and Engineering', courseType: 'Bachelor', year: 1, email: 'karthikeyan.s@sairam.edu.in', phone: '9876543220', status: 'Active', createdAt: new Date(), updatedAt: new Date() },
-];
-
-const initialProjectMembers = [
-  { id: 'pm-1', studentId: '23CS101', projectCode: 'AGRI-01', role: 'Lead Developer' },
-  { id: 'pm-2', studentId: '23CS103', projectCode: 'AGRI-01', role: 'Member' },
-  { id: 'pm-3', studentId: '23CS101', projectCode: 'SMRT-02', role: 'Developer' },
-  { id: 'pm-4', studentId: '23CS102', projectCode: 'SMRT-02', role: 'Member' },
-  { id: 'pm-5', studentId: '23CS104', projectCode: 'HLTH-03', role: 'Lead' },
-  { id: 'pm-6', studentId: '23CS105', projectCode: 'HLTH-03', role: 'Developer' },
-  { id: 'pm-7', studentId: '23ME101', projectCode: 'ECO-04', role: 'Lead' },
-  { id: 'pm-8', studentId: '23EC101', projectCode: 'ECO-04', role: 'Member' },
-  { id: 'pm-9', studentId: 'SEC24CS110', projectCode: 'AGRI-01', role: 'Developer' },
+  {
+    id: 'SECP24ES01',
+    name: 'Karthick A',
+    category: 'Student',
+    department: 'Electronics and Communication Engineering',
+    courseType: 'Bachelor',
+    year: 2,
+    email: 'secp24es01@sairamtap.edu.in',
+    phone: '7305634366',
+    status: 'Active',
+    mentorId: 'b109a501-0000-4000-8000-000000000001',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'SECP24ES02',
+    name: 'Tharunkumar P',
+    category: 'Student',
+    department: 'Electronics and Communication Engineering',
+    courseType: 'Bachelor',
+    year: 2,
+    email: 'secp24es02@sairamtap.edu.in',
+    phone: '7305634366',
+    status: 'Active',
+    mentorId: 'b109a501-0000-4000-8000-000000000001',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'INT-0488',
+    name: 'Karthik',
+    category: 'Intern',
+    startupName: 'SkyRobotics',
+    department: 'SkyRobotics',
+    courseType: 'Intern',
+    year: 0,
+    email: 'intern.9025670488@incubation.local',
+    phone: '9025670488',
+    status: 'Active',
+    mentorId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
 ];
 
 const todayStr = new Date().toISOString().split('T')[0];
-const yesterdayDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
 interface FoodListInternal {
   date: string;
@@ -69,45 +93,27 @@ const initialFoodLists: FoodListInternal[] = [
     createdAt: new Date(),
     updatedAt: new Date(),
   },
-  {
-    date: '2026-09-25',
-    status: 'Finalized',
-    finalizedBy: 'Admin User',
-    finalizedAt: new Date('2026-09-24T18:15:00Z'),
-    createdById: 'staff-001',
-    createdAt: new Date('2026-09-24T10:00:00Z'),
-    updatedAt: new Date(),
-  },
 ];
 
 const initialEligibilities = [
-  { id: 'el-1', date: todayStr, studentId: '23CS101', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-2', date: todayStr, studentId: '23CS102', projectCode: 'SMRT-02', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-3', date: todayStr, studentId: '23CS103', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-4', date: todayStr, studentId: '23CS104', projectCode: 'HLTH-03', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-5', date: todayStr, studentId: '23CS105', projectCode: 'HLTH-03', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-6', date: todayStr, studentId: '23ME101', projectCode: 'ECO-04', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-7', date: '2026-09-25', studentId: '23CS101', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-8', date: '2026-09-25', studentId: '23CS102', projectCode: 'SMRT-02', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-9', date: '2026-09-25', studentId: '23CS103', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
-  { id: 'el-10', date: todayStr, studentId: 'SEC24CS110', projectCode: 'AGRI-01', addedBy: 'Staff', status: 'Eligible', createdAt: new Date() },
+  {
+    id: 'el-1',
+    date: todayStr,
+    studentId: 'SECP24ES01',
+    mentorId: 'b109a501-0000-4000-8000-000000000001',
+    addedBy: 'Staff',
+    status: 'Eligible',
+    createdAt: new Date(),
+  },
 ];
 
-const dateTag = todayStr.replace(/-/g, '').slice(2);
-const initialTokens = [
-  { id: 'tok-1', tokenNumber: `INC-${dateTag}-001`, date: todayStr, studentId: '23CS101', projectCode: 'AGRI-01', status: 'Generated', issuedAt: new Date(Date.now() - 3600000 * 2), issuedById: 'staff-001' },
-  { id: 'tok-2', tokenNumber: `INC-${dateTag}-002`, date: todayStr, studentId: '23CS102', projectCode: 'SMRT-02', status: 'Generated', issuedAt: new Date(Date.now() - 3600000 * 1.8), issuedById: 'staff-001' },
-  { id: 'tok-3', tokenNumber: `INC-${dateTag}-003`, date: todayStr, studentId: '23CS103', projectCode: 'AGRI-01', status: 'Generated', issuedAt: new Date(Date.now() - 3600000 * 1.5), issuedById: 'staff-001' },
-  { id: 'tok-4', tokenNumber: `INC-${dateTag}-004`, date: todayStr, studentId: '23CS104', projectCode: 'HLTH-03', status: 'Generated', issuedAt: new Date(Date.now() - 3600000 * 1.2), issuedById: 'staff-001' },
-  { id: 'tok-5', tokenNumber: `INC-${dateTag}-005`, date: todayStr, studentId: '23CS105', projectCode: 'HLTH-03', status: 'Generated', issuedAt: new Date(Date.now() - 3600000 * 0.9), issuedById: 'staff-001' },
-];
+const initialTokens: any[] = [];
 
 // In-Memory Data Store (Persisted across hot reloads using globalThis)
 interface Store {
   staffUsers: typeof initialStaff;
-  projects: typeof initialProjects;
+  mentors: typeof initialMentors;
   students: typeof initialStudents;
-  projectMembers: typeof initialProjectMembers;
   dailyFoodLists: typeof initialFoodLists;
   dailyFoodEligibilities: typeof initialEligibilities;
   foodTokens: typeof initialTokens;
@@ -121,9 +127,8 @@ const globalStore = globalThis as unknown as {
 if (!globalStore._incubationStore) {
   globalStore._incubationStore = {
     staffUsers: [...initialStaff],
-    projects: [...initialProjects],
+    mentors: [...initialMentors],
     students: [...initialStudents],
-    projectMembers: [...initialProjectMembers],
     dailyFoodLists: [...initialFoodLists],
     dailyFoodEligibilities: [...initialEligibilities],
     foodTokens: [...initialTokens],
@@ -132,7 +137,7 @@ if (!globalStore._incubationStore) {
 
 const store = globalStore._incubationStore;
 
-// Check if valid PostgreSQL DATABASE_URL is configured (not placeholder)
+// Check if valid PostgreSQL DATABASE_URL is configured
 const hasValidDatabaseUrl = () => {
   const url = process.env.DATABASE_URL;
   return Boolean(
@@ -157,7 +162,6 @@ function getRealPrisma(): PrismaClient | null {
 
       client.$on('error', (e: any) => {
         const msg = e?.message || String(e);
-        // Benign idle connection recycling or transient network jitter handled by resilient proxy
         if (
           msg.includes('10054') ||
           msg.includes('10053') ||
@@ -256,38 +260,111 @@ const memoryPrisma: any = {
     },
   },
 
+  mentor: {
+    findUnique: async ({ where, include }: any) => {
+      const m = store.mentors.find(men => men.id === where.id);
+      if (!m) return null;
+      const res: any = { ...m };
+      if (include?.students) {
+        res.students = store.students.filter(s => s.mentorId === m.id);
+      }
+      return res;
+    },
+    findMany: async (args: any = {}) => {
+      let list = [...store.mentors];
+      if (args.where?.status) {
+        list = list.filter(m => m.status === args.where.status);
+      }
+      if (args.include?.students) {
+        return list.map(m => ({
+          ...m,
+          students: store.students.filter(s => s.mentorId === m.id),
+        }));
+      }
+      return list;
+    },
+    create: async ({ data }: { data: any }) => {
+      const newMentor = {
+        id: data.id || `mentor-${Date.now()}`,
+        name: data.name,
+        department: data.department || 'Incubation Center',
+        designation: data.designation || 'Faculty Mentor',
+        status: data.status || 'Active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      store.mentors.push(newMentor);
+      return newMentor;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: any }) => {
+      const m = store.mentors.find(men => men.id === where.id);
+      if (!m) throw new Error('Mentor not found');
+      Object.assign(m, data, { updatedAt: new Date() });
+      return m;
+    },
+    delete: async ({ where }: any) => {
+      const idx = store.mentors.findIndex(m => m.id === where.id);
+      if (idx !== -1) {
+        return store.mentors.splice(idx, 1)[0];
+      }
+      return null;
+    },
+    count: async () => store.mentors.length,
+    upsert: async ({ where, create, update }: any) => {
+      const existing = await memoryPrisma.mentor.findUnique({ where });
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      return memoryPrisma.mentor.create({ data: create });
+    },
+  },
+
   student: {
-    findUnique: async ({ where, include }: { where: { id?: string; email?: string }; include?: any }) => {
+    findUnique: async ({ where, include }: any) => {
       const s = store.students.find(st => (where.id && st.id.toUpperCase() === where.id.toUpperCase()) || (where.email && st.email === where.email));
       if (!s) return null;
       const res: any = { ...s };
-      if (include?.projectMemberships) {
-        res.projectMemberships = store.projectMembers
-          .filter(pm => pm.studentId === s.id)
-          .map(pm => ({
-            ...pm,
-            project: store.projects.find(p => p.code === pm.projectCode),
-          }));
+      if (include?.mentor && s.mentorId) {
+        res.mentor = store.mentors.find(m => m.id === s.mentorId) || null;
+      }
+      return res;
+    },
+    findFirst: async ({ where, include }: any = {}) => {
+      const s = store.students.find(st => {
+        if (where?.id && st.id.toUpperCase() === where.id.toUpperCase()) return true;
+        if (where?.phone && st.phone && st.phone.includes(where.phone.contains || where.phone)) return true;
+        if (where?.OR) {
+          return where.OR.some((clause: any) => {
+            if (clause.id === st.id) return true;
+            if (clause.phone?.endsWith && st.phone?.endsWith(clause.phone.endsWith)) return true;
+            return false;
+          });
+        }
+        return false;
+      });
+      if (!s) return null;
+      const res: any = { ...s };
+      if (include?.mentor && s.mentorId) {
+        res.mentor = store.mentors.find(m => m.id === s.mentorId) || null;
       }
       return res;
     },
     findMany: async (args: any = {}) => {
       let list = [...store.students];
+      if (args.where?.category) {
+        list = list.filter(s => s.category === args.where.category);
+      }
       if (args.where?.department) {
         list = list.filter(s => s.department === args.where.department);
       }
       if (args.where?.status) {
         list = list.filter(s => s.status === args.where.status);
       }
-      if (args.include?.projectMemberships) {
+      if (args.include?.mentor) {
         return list.map(s => ({
           ...s,
-          projectMemberships: store.projectMembers
-            .filter(pm => pm.studentId === s.id)
-            .map(pm => ({
-              ...pm,
-              project: store.projects.find(p => p.code === pm.projectCode),
-            })),
+          mentor: s.mentorId ? store.mentors.find(m => m.id === s.mentorId) || null : null,
         }));
       }
       return list;
@@ -298,25 +375,28 @@ const memoryPrisma: any = {
       const newStudent = {
         id: data.id.toUpperCase(),
         name: data.name,
+        category: data.category || 'Student',
+        startupName: data.startupName || null,
         department: data.department,
         courseType: data.courseType || 'Bachelor',
-        year: Number(data.year),
+        year: Number(data.year) || 0,
         email: data.email,
         phone: data.phone || null,
         status: data.status || 'Active',
+        mentorId: data.mentorId || null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
       store.students.push(newStudent);
       return newStudent;
     },
-    update: async ({ where, data, include }: { where: { id: string }; data: any; include?: any }) => {
+    update: async ({ where, data, include }: any) => {
       const student = store.students.find(s => s.id.toUpperCase() === where.id.toUpperCase());
       if (!student) throw new Error('Student not found');
       Object.assign(student, data, { updatedAt: new Date() });
       const res: any = { ...student };
-      if (include?.projectMemberships) {
-        res.projectMemberships = store.projectMembers.filter(pm => pm.studentId.toUpperCase() === student.id.toUpperCase());
+      if (include?.mentor && student.mentorId) {
+        res.mentor = store.mentors.find(m => m.id === student.mentorId) || null;
       }
       return res;
     },
@@ -327,9 +407,7 @@ const memoryPrisma: any = {
       }
       return null;
     },
-    count: async (args: any = {}) => {
-      return store.students.length;
-    },
+    count: async () => store.students.length,
     upsert: async ({ where, create, update }: any) => {
       const existing = await memoryPrisma.student.findUnique({ where });
       if (existing) {
@@ -339,140 +417,8 @@ const memoryPrisma: any = {
     },
   },
 
-  project: {
-    findUnique: async ({ where, include }: { where: { code: string }; include?: any }) => {
-      const p = store.projects.find(pr => pr.code.toUpperCase() === where.code.toUpperCase());
-      if (!p) return null;
-      const res: any = { ...p };
-      if (include?.members) {
-        res.members = store.projectMembers
-          .filter(pm => pm.projectCode === p.code)
-          .map(pm => ({
-            ...pm,
-            student: store.students.find(s => s.id === pm.studentId),
-          }));
-      }
-      return res;
-    },
-    findMany: async (args: any = {}) => {
-      let list = [...store.projects];
-      if (args.where?.status) {
-        list = list.filter(p => p.status === args.where.status);
-      }
-      if (args.include?.members) {
-        return list.map(p => ({
-          ...p,
-          members: store.projectMembers
-            .filter(pm => pm.projectCode === p.code)
-            .map(pm => ({
-              ...pm,
-              student: store.students.find(s => s.id === pm.studentId),
-            })),
-        }));
-      }
-      return list;
-    },
-    create: async ({ data }: { data: any }) => {
-      const code = data.code.toUpperCase();
-      if (store.projects.some(p => p.code === code)) {
-        throw new Error(`Project code ${code} already exists`);
-      }
-      const newProj = {
-        code,
-        name: data.name,
-        description: data.description || null,
-        status: data.status || 'Active',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      store.projects.push(newProj);
-      return newProj;
-    },
-    update: async ({ where, data }: { where: { code: string }; data: any }) => {
-      const project = store.projects.find(p => p.code.toUpperCase() === where.code.toUpperCase());
-      if (!project) throw new Error('Project not found');
-      Object.assign(project, data, { updatedAt: new Date() });
-      return project;
-    },
-    delete: async ({ where }: any) => {
-      const idx = store.projects.findIndex(p => p.code.toUpperCase() === where.code.toUpperCase());
-      if (idx !== -1) {
-        return store.projects.splice(idx, 1)[0];
-      }
-      return null;
-    },
-    count: async (args: any = {}) => {
-      return store.projects.length;
-    },
-    upsert: async ({ where, create, update }: any) => {
-      const existing = await memoryPrisma.project.findUnique({ where });
-      if (existing) {
-        Object.assign(existing, update, { updatedAt: new Date() });
-        return existing;
-      }
-      return memoryPrisma.project.create({ data: create });
-    },
-  },
-
-  projectMember: {
-    findUnique: async ({ where }: any) => {
-      if (where.studentId_projectCode) {
-        return store.projectMembers.find(
-          pm => pm.studentId === where.studentId_projectCode.studentId &&
-                pm.projectCode === where.studentId_projectCode.projectCode
-        ) || null;
-      }
-      return store.projectMembers.find(pm => pm.id === where.id) || null;
-    },
-    create: async ({ data }: { data: any }) => {
-      const existing = store.projectMembers.find(
-        pm => pm.studentId === data.studentId && pm.projectCode === data.projectCode
-      );
-      if (existing) {
-        existing.role = data.role || existing.role;
-        return existing;
-      }
-      const newMember = {
-        id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        studentId: data.studentId,
-        projectCode: data.projectCode,
-        role: data.role || 'Member',
-      };
-      store.projectMembers.push(newMember);
-      return newMember;
-    },
-    delete: async ({ where }: any) => {
-      const idx = store.projectMembers.findIndex(
-        pm => (where.id && pm.id === where.id) ||
-              (where.studentId_projectCode &&
-               pm.studentId === where.studentId_projectCode.studentId &&
-               pm.projectCode === where.studentId_projectCode.projectCode)
-      );
-      if (idx !== -1) {
-        const [deleted] = store.projectMembers.splice(idx, 1);
-        return deleted;
-      }
-      return null;
-    },
-    deleteMany: async ({ where }: any) => {
-      let count = 0;
-      store.projectMembers = store.projectMembers.filter(pm => {
-        if (where?.studentId && pm.studentId.toUpperCase() === where.studentId.toUpperCase()) {
-          count++;
-          return false;
-        }
-        if (where?.projectCode && pm.projectCode.toUpperCase() === where.projectCode.toUpperCase()) {
-          count++;
-          return false;
-        }
-        return true;
-      });
-      return { count };
-    },
-  },
-
   dailyFoodList: {
-    findUnique: async ({ where, include }: { where: { date: string }; include?: any }) => {
+    findUnique: async ({ where, include }: any) => {
       const list = store.dailyFoodLists.find(l => l.date === where.date);
       if (!list) return null;
       const res: any = { ...list };
@@ -482,7 +428,7 @@ const memoryPrisma: any = {
           .map(e => ({
             ...e,
             student: store.students.find(s => s.id === e.studentId),
-            project: store.projects.find(p => p.code === e.projectCode),
+            mentor: e.mentorId ? store.mentors.find(m => m.id === e.mentorId) : null,
           }));
       }
       return res;
@@ -497,13 +443,13 @@ const memoryPrisma: any = {
             .map(e => ({
               ...e,
               student: store.students.find(s => s.id === e.studentId),
-              project: store.projects.find(p => p.code === e.projectCode),
+              mentor: e.mentorId ? store.mentors.find(m => m.id === e.mentorId) : null,
             })),
         }));
       }
       return lists;
     },
-    create: async ({ data }: { data: any }) => {
+    create: async ({ data }: any) => {
       const newList = {
         date: data.date,
         status: data.status || 'Draft',
@@ -516,7 +462,7 @@ const memoryPrisma: any = {
       store.dailyFoodLists.push(newList);
       return newList;
     },
-    update: async ({ where, data }: { where: { date: string }; data: any }) => {
+    update: async ({ where, data }: any) => {
       let list = store.dailyFoodLists.find(l => l.date === where.date);
       if (!list) {
         list = {
@@ -543,7 +489,7 @@ const memoryPrisma: any = {
   },
 
   dailyFoodEligibility: {
-    findUnique: async ({ where, include }: { where: { date_studentId?: { date: string; studentId: string }; id?: string }; include?: any }) => {
+    findUnique: async ({ where, include }: any) => {
       const el = store.dailyFoodEligibilities.find(e => {
         if (where.date_studentId) {
           return e.date === where.date_studentId.date && e.studentId.toUpperCase() === where.date_studentId.studentId.toUpperCase();
@@ -552,8 +498,8 @@ const memoryPrisma: any = {
       });
       if (!el) return null;
       const res: any = { ...el };
-      if (include?.project) {
-        res.project = store.projects.find(p => p.code === el.projectCode);
+      if (include?.mentor && el.mentorId) {
+        res.mentor = store.mentors.find(m => m.id === el.mentorId) || null;
       }
       if (include?.student) {
         res.student = store.students.find(s => s.id === el.studentId);
@@ -568,16 +514,16 @@ const memoryPrisma: any = {
       if (args.where?.studentId) {
         list = list.filter(e => e.studentId === args.where.studentId);
       }
-      if (args.include?.project || args.include?.student) {
+      if (args.include?.mentor || args.include?.student) {
         return list.map(e => ({
           ...e,
-          project: args.include?.project ? store.projects.find(p => p.code === e.projectCode) : undefined,
+          mentor: e.mentorId ? store.mentors.find(m => m.id === e.mentorId) : null,
           student: args.include?.student ? store.students.find(s => s.id === e.studentId) : undefined,
         }));
       }
       return list;
     },
-    create: async ({ data }: { data: any }) => {
+    create: async ({ data }: any) => {
       const studentId = data.studentId.toUpperCase();
       const existing = store.dailyFoodEligibilities.find(
         e => e.date === data.date && e.studentId === studentId
@@ -587,7 +533,7 @@ const memoryPrisma: any = {
         id: `el-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         date: data.date,
         studentId,
-        projectCode: data.projectCode,
+        mentorId: data.mentorId || null,
         addedBy: data.addedBy || 'Staff',
         status: data.status || 'Eligible',
         createdAt: new Date(),
@@ -603,8 +549,7 @@ const memoryPrisma: any = {
         return e.id === where.id;
       });
       if (idx !== -1) {
-        const [del] = store.dailyFoodEligibilities.splice(idx, 1);
-        return del;
+        return store.dailyFoodEligibilities.splice(idx, 1)[0];
       }
       return null;
     },
@@ -622,18 +567,17 @@ const memoryPrisma: any = {
       let list = store.dailyFoodEligibilities;
       if (args.where?.date) list = list.filter(e => e.date === args.where.date);
       if (args.where?.studentId) list = list.filter(e => e.studentId.toUpperCase() === args.where.studentId.toUpperCase());
-      if (args.where?.projectCode) list = list.filter(e => e.projectCode.toUpperCase() === args.where.projectCode.toUpperCase());
       return list.length;
     },
   },
 
   foodToken: {
-    findUnique: async ({ where, include }: { where: { date_studentId_session?: { date: string; studentId: string; session: string }; date_studentId?: { date: string; studentId: string }; tokenNumber?: string; id?: string }; include?: any }) => {
+    findUnique: async ({ where, include }: any) => {
       const t = store.foodTokens.find(tok => {
         if (where.date_studentId_session) {
           return tok.date === where.date_studentId_session.date &&
                  tok.studentId.toUpperCase() === where.date_studentId_session.studentId.toUpperCase() &&
-                 ((tok as any).session || 'LUNCH').toUpperCase() === where.date_studentId_session.session.toUpperCase();
+                 (tok.session || 'LUNCH').toUpperCase() === where.date_studentId_session.session.toUpperCase();
         }
         if (where.date_studentId) {
           return tok.date === where.date_studentId.date && tok.studentId.toUpperCase() === where.date_studentId.studentId.toUpperCase();
@@ -644,12 +588,12 @@ const memoryPrisma: any = {
         return tok.id === where.id;
       });
       if (!t) return null;
-      const res: any = { ...t, session: (t as any).session || 'LUNCH' };
+      const res: any = { ...t, session: t.session || 'LUNCH' };
       if (include?.student) {
         res.student = store.students.find(s => s.id === t.studentId);
       }
-      if (include?.project) {
-        res.project = store.projects.find(p => p.code === t.projectCode);
+      if (include?.mentor && t.mentorId) {
+        res.mentor = store.mentors.find(m => m.id === t.mentorId) || null;
       }
       return res;
     },
@@ -658,7 +602,7 @@ const memoryPrisma: any = {
       if (where) {
         if (where.date) list = list.filter(t => t.date === where.date);
         if (where.studentId) list = list.filter(t => t.studentId.toUpperCase() === where.studentId.toUpperCase());
-        if (where.session) list = list.filter(t => ((t as any).session || 'LUNCH').toUpperCase() === where.session.toUpperCase());
+        if (where.session) list = list.filter(t => (t.session || 'LUNCH').toUpperCase() === where.session.toUpperCase());
         if (where.tokenNumber) list = list.filter(t => t.tokenNumber.toUpperCase() === where.tokenNumber.toUpperCase());
       }
       if (orderBy?.issuedAt === 'desc') {
@@ -666,12 +610,12 @@ const memoryPrisma: any = {
       }
       const t = list[0] || null;
       if (!t) return null;
-      const res: any = { ...t, session: (t as any).session || 'LUNCH' };
+      const res: any = { ...t, session: t.session || 'LUNCH' };
       if (include?.student) {
         res.student = store.students.find(s => s.id === t.studentId);
       }
-      if (include?.project) {
-        res.project = store.projects.find(p => p.code === t.projectCode);
+      if (include?.mentor && t.mentorId) {
+        res.mentor = store.mentors.find(m => m.id === t.mentorId) || null;
       }
       return res;
     },
@@ -684,38 +628,34 @@ const memoryPrisma: any = {
         list = list.filter(t => t.studentId === args.where.studentId);
       }
       if (args.where?.session) {
-        list = list.filter(t => ((t as any).session || 'LUNCH').toUpperCase() === args.where.session.toUpperCase());
+        list = list.filter(t => (t.session || 'LUNCH').toUpperCase() === args.where.session.toUpperCase());
       }
       if (args.orderBy?.issuedAt === 'desc') {
         list.sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
       }
-      if (args.include?.student || args.include?.project) {
+      if (args.include?.student || args.include?.mentor) {
         return list.map(t => ({
           ...t,
-          session: (t as any).session || 'LUNCH',
+          session: t.session || 'LUNCH',
           student: args.include?.student ? store.students.find(s => s.id === t.studentId) : undefined,
-          project: args.include?.project ? store.projects.find(p => p.code === t.projectCode) : undefined,
+          mentor: t.mentorId ? store.mentors.find(m => m.id === t.mentorId) : null,
         }));
       }
       return list;
     },
     count: async (args: any = {}) => {
       let list = store.foodTokens;
-      if (args.where?.date) {
-        list = list.filter(t => t.date === args.where.date);
-      }
-      if (args.where?.session) {
-        list = list.filter(t => ((t as any).session || 'LUNCH').toUpperCase() === args.where.session.toUpperCase());
-      }
+      if (args.where?.date) list = list.filter(t => t.date === args.where.date);
+      if (args.where?.session) list = list.filter(t => (t.session || 'LUNCH').toUpperCase() === args.where.session.toUpperCase());
       return list.length;
     },
-    create: async ({ data }: { data: any }) => {
+    create: async ({ data }: any) => {
       const newToken = {
         id: `tok-${Date.now()}`,
         tokenNumber: data.tokenNumber,
         date: data.date,
         studentId: data.studentId.toUpperCase(),
-        projectCode: data.projectCode,
+        mentorId: data.mentorId || null,
         session: data.session || 'LUNCH',
         status: data.status || 'Generated',
         issuedAt: new Date(),
@@ -723,6 +663,16 @@ const memoryPrisma: any = {
       };
       store.foodTokens.push(newToken);
       return newToken;
+    },
+    deleteMany: async ({ where }: any) => {
+      let count = 0;
+      store.foodTokens = store.foodTokens.filter(t => {
+        if (where?.date && t.date !== where.date) return true;
+        if (where?.studentId && t.studentId !== where.studentId) return true;
+        count++;
+        return false;
+      });
+      return { count };
     },
   },
 
@@ -776,7 +726,7 @@ function createResilientModelProxy(modelName: string) {
             return await (realPrisma as any)[modelName][method](...args);
           } catch (error: any) {
             if (isConnectionError(error)) {
-              console.warn(`[Prisma ${modelName}.${method}] Connection reset by remote host. Reconnecting to database...`);
+              console.warn(`[Prisma ${modelName}.${method}] Connection reset. Reconnecting to database...`);
               if (globalStore._prismaClient) {
                 try {
                   await globalStore._prismaClient.$disconnect().catch(() => {});
@@ -784,7 +734,6 @@ function createResilientModelProxy(modelName: string) {
               }
               globalStore._prismaClient = undefined;
               
-              // Wait 250ms and retry query once with fresh connection
               await new Promise(r => setTimeout(r, 250));
               const freshClient = getRealPrisma();
               if (freshClient && (freshClient as any)[modelName] && typeof (freshClient as any)[modelName][method] === 'function') {
@@ -797,7 +746,6 @@ function createResilientModelProxy(modelName: string) {
                 }
               }
             } else {
-              // Business validation error (e.g. P2002 Unique Constraint) -> rethrow for action handling
               throw error;
             }
           }
@@ -812,8 +760,6 @@ function createResilientModelProxy(modelName: string) {
   });
 }
 
-// Export unified Prisma client: uses real Supabase PostgreSQL if connected,
-// else seamlessly falls back to the resilient transactional in-memory database.
 export const prisma: any = new Proxy({}, {
   get(_target, prop: string) {
     if (prop === '$transaction') {
@@ -853,4 +799,3 @@ export const prisma: any = new Proxy({}, {
     return createResilientModelProxy(prop);
   },
 });
-

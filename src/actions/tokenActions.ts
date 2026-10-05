@@ -4,7 +4,6 @@ import { prisma, ensureDefaultStaffUser } from '@/lib/db';
 import { appCache } from '@/lib/cache';
 import { getMealSession, getDuplicateTokenMessage, getTokenEffectiveSession, getTodayISTDateString, formatISTTime, formatISTDateDMY, getPreviousISTDateString } from '@/utils/timeUtils';
 import { normalizeDepartmentName } from '@/utils/departmentUtils';
-import { revalidatePath } from 'next/cache';
 
 export interface IssueTokenResult {
   success: boolean;
@@ -82,6 +81,7 @@ async function resolveStudent(dbOrTx: any, idInput: string) {
   // 1. Exact ID
   let student = await dbOrTx.student.findUnique({
     where: { id: upper },
+    include: { mentor: true },
   });
 
   // 2. Prefixed INT- ID if input was "INT 3210" or "INT3210"
@@ -89,6 +89,7 @@ async function resolveStudent(dbOrTx: any, idInput: string) {
     const cleanInt = 'INT-' + upper.replace(/^INT[-_\s]*/, '');
     student = await dbOrTx.student.findUnique({
       where: { id: cleanInt },
+      include: { mentor: true },
     });
   }
 
@@ -102,6 +103,7 @@ async function resolveStudent(dbOrTx: any, idInput: string) {
           { phone: { endsWith: digits } },
         ],
       },
+      include: { mentor: true },
     });
   }
 
@@ -111,6 +113,7 @@ async function resolveStudent(dbOrTx: any, idInput: string) {
       where: {
         phone: { contains: digits },
       },
+      include: { mentor: true },
     });
   }
 
@@ -135,7 +138,6 @@ export async function verifyStudentScan(
   }
 
   try {
-    // 1. Flexible lookup in institutional registry
     const student = await resolveStudent(prisma, inputQuery);
 
     if (!student) {
@@ -147,23 +149,16 @@ export async function verifyStudentScan(
       };
     }
 
-    const isIntern = student.id.startsWith('INT-') || student.courseType === 'Intern';
+    const isIntern = student.category === 'Intern' || student.id.startsWith('INT-') || student.courseType === 'Intern';
     const category: 'Student' | 'Intern' = isIntern ? 'Intern' : 'Student';
-    const startupName = isIntern ? student.department : undefined;
+    const startupName = isIntern ? (student.startupName || student.department) : undefined;
 
     const currentSession = sessionOverride || getMealSession();
     const yesterdayStr = getPreviousISTDateString(date);
 
-    // 2. Strict 3-Meal Night-Stay Reference:
-    // List L defines: Meal 1 (Dinner L), Meal 2 (Breakfast L+1), Meal 3 (Lunch L+1).
-    // Therefore:
-    // - BREAKFAST today (Meal 2) MUST reference yesterday's list (yesterdayStr)
-    // - LUNCH today (Meal 3)     MUST reference yesterday's list (yesterdayStr)
-    // - DINNER today (Meal 1)    MUST reference today's list (date)
     const isMorningOrAfternoon = currentSession === 'BREAKFAST' || currentSession === 'LUNCH';
     const listToRefer = isMorningOrAfternoon ? yesterdayStr : date;
 
-    // Check student strictly in the referenced list:
     let eligibility = await prisma.dailyFoodEligibility.findUnique({
       where: {
         date_studentId: {
@@ -171,24 +166,11 @@ export async function verifyStudentScan(
           studentId: student.id,
         },
       },
-      include: { project: true },
+      include: { mentor: true },
     });
 
-    const isNightStayCycle = isMorningOrAfternoon && Boolean(eligibility);
-
-    // Also check if any project membership exists to show project name
-    let projectName = eligibility?.project?.name || eligibility?.projectCode;
-    if (!projectName) {
-      const pm = await prisma.projectMember.findFirst?.({
-        where: { studentId: student.id },
-      });
-      if (pm) {
-        const proj = await prisma.project.findUnique({ where: { code: pm.projectCode } });
-        projectName = proj?.name || pm.projectCode;
-      }
-    }
-
-    if (isIntern && (!projectName || projectName === 'GEN-INTERN' || projectName === 'Startup Interns')) {
+    let projectName = eligibility?.mentor?.name || student.mentor?.name;
+    if (isIntern && (!projectName || projectName === 'General')) {
       projectName = startupName ? `Startup: ${startupName}` : 'Startup Intern';
     }
 
@@ -204,7 +186,6 @@ export async function verifyStudentScan(
     };
 
     if (!eligibility) {
-      // Diagnostic check: check if student is registered for tonight's stay instead
       if (isMorningOrAfternoon) {
         const registeredTonight = await prisma.dailyFoodEligibility.findUnique({
           where: {
@@ -213,13 +194,14 @@ export async function verifyStudentScan(
               studentId: student.id,
             },
           },
+          include: { mentor: true },
         });
 
         if (registeredTonight) {
           return {
             found: true,
             student: studentInfo,
-            project: projectName || registeredTonight.projectCode || 'Unassigned',
+            project: registeredTonight.mentor?.name || projectName || 'General',
             isEligible: false,
             isDuplicate: false,
             message: `${category} "${student.name}" (${student.id}) is approved on the ${formatISTDateDMY(date)} list (first meal is Dinner tonight at 07:30 PM). They are NOT on the ${formatISTDateDMY(yesterdayStr)} list for today's ${currentSession}.`,
@@ -234,14 +216,13 @@ export async function verifyStudentScan(
       return {
         found: true,
         student: studentInfo,
-        project: projectName || 'Unassigned',
+        project: projectName || 'General',
         isEligible: false,
         isDuplicate: false,
         message: notEligibleMsg,
       };
     }
 
-    // 3. Check if token was already issued for this date AND current session
     const studentTokensToday = await prisma.foodToken.findMany({
       where: {
         date,
@@ -277,7 +258,7 @@ export async function verifyStudentScan(
       return {
         found: true,
         student: studentInfo,
-        project: projectName,
+        project: projectName || 'General',
         isEligible: true,
         isDuplicate: true,
         existingToken: {
@@ -294,7 +275,7 @@ export async function verifyStudentScan(
     return {
       found: true,
       student: studentInfo,
-      project: projectName,
+      project: projectName || 'General',
       isEligible: true,
       isDuplicate: false,
       message: `${category} "${student.name}" is eligible for ${currentSession} token.`,
@@ -327,15 +308,14 @@ export async function issueFoodToken(
     const validStaffId = await ensureDefaultStaffUser();
 
     return await prisma.$transaction(async (tx: any) => {
-      // 1. Flexible lookup in institutional registry
       const student = await resolveStudent(tx, inputQuery);
       if (!student) {
         return { success: false, notFound: true, message: `ID "${inputQuery}" not found in institutional registry.` };
       }
 
-      const isIntern = student.id.startsWith('INT-') || student.courseType === 'Intern';
+      const isIntern = student.category === 'Intern' || student.id.startsWith('INT-') || student.courseType === 'Intern';
       const category: 'Student' | 'Intern' = isIntern ? 'Intern' : 'Student';
-      const startupName = isIntern ? student.department : undefined;
+      const startupName = isIntern ? (student.startupName || student.department) : undefined;
 
       const studentInfo = {
         id: student.id,
@@ -351,14 +331,9 @@ export async function issueFoodToken(
       const session = sessionOverride || getMealSession();
       const yesterdayStr = getPreviousISTDateString(todayStr);
 
-      // Strict 3-Meal Night-Stay Reference:
-      // - BREAKFAST today (Meal 2) MUST reference yesterday's list (yesterdayStr)
-      // - LUNCH today (Meal 3)     MUST reference yesterday's list (yesterdayStr)
-      // - DINNER today (Meal 1)    MUST reference today's list (todayStr)
       const isMorningOrAfternoon = session === 'BREAKFAST' || session === 'LUNCH';
       const listToRefer = isMorningOrAfternoon ? yesterdayStr : todayStr;
 
-      // 2. Verify Eligibility strictly in the referenced Food List
       let eligibility = await tx.dailyFoodEligibility.findUnique({
         where: {
           date_studentId: {
@@ -366,13 +341,12 @@ export async function issueFoodToken(
             studentId: student.id,
           },
         },
-        include: { project: true },
+        include: { mentor: true },
       });
 
       const isNightStayCycle = isMorningOrAfternoon && Boolean(eligibility);
 
       if (!eligibility) {
-        // Diagnostic check: check if student is registered for tonight's stay instead
         if (isMorningOrAfternoon) {
           const registeredTonight = await tx.dailyFoodEligibility.findUnique({
             where: {
@@ -405,7 +379,6 @@ export async function issueFoodToken(
         };
       }
 
-      // 3. Check for Duplicate Token for current session Today
       const studentTokensToday = await tx.foodToken.findMany({
         where: {
           date: todayStr,
@@ -420,8 +393,8 @@ export async function issueFoodToken(
           getTokenEffectiveSession(t) === session
       );
 
-      let projectName = eligibility.project?.name || eligibility.projectCode;
-      if (isIntern && (!projectName || projectName === 'GEN-INTERN' || projectName === 'Startup Interns')) {
+      let projectName = eligibility.mentor?.name || student.mentor?.name || 'General';
+      if (isIntern && (!projectName || projectName === 'General')) {
         projectName = startupName ? `Startup: ${startupName}` : 'Startup Intern';
       }
 
@@ -459,7 +432,6 @@ export async function issueFoodToken(
         };
       }
 
-      // 4. Generate Consecutive Daily Token Sequence (Find highest sequence number to avoid collisions)
       const dateTag = todayStr.replace(/-/g, '').slice(2);
       const existingTodayTokens = await tx.foodToken.findMany({
         where: {
@@ -481,27 +453,26 @@ export async function issueFoodToken(
       let nextSeqNum = Math.max(maxSeq + 1, 1);
       let tokenNumber = `INC-${dateTag}-${String(nextSeqNum).padStart(3, '0')}`;
 
-      // Additional guarantee: ensure unique token number
       while (await tx.foodToken.findUnique({ where: { tokenNumber } })) {
         nextSeqNum++;
         tokenNumber = `INC-${dateTag}-${String(nextSeqNum).padStart(3, '0')}`;
       }
 
-      // 5. Create Token Record
+      const mentorId = eligibility.mentorId || student.mentorId || null;
+
       try {
         const token = await tx.foodToken.create({
           data: {
             tokenNumber,
             date: todayStr,
             studentId: student.id,
-            projectCode: eligibility.projectCode,
+            mentorId,
             session,
             status: 'Generated',
             issuedById: validStaffId,
           },
         });
 
-        // 6. Refresh cached Dashboard and Food Token views
         appCache.invalidateTags(['dashboard', 'foodtokens', 'foodlist']);
 
         const timeFormatted = formatISTTime(token.issuedAt);
@@ -553,7 +524,7 @@ export async function getFoodTokens(date?: string) {
         where,
         include: {
           student: true,
-          project: true,
+          mentor: true,
         },
         orderBy: { issuedAt: 'desc' },
       });
@@ -561,11 +532,11 @@ export async function getFoodTokens(date?: string) {
       return tokens.map((t: any) => {
         const issuedDate = t.issuedAt instanceof Date ? t.issuedAt : new Date();
         const session = getTokenEffectiveSession(t);
-        const isIntern = t.student?.id?.startsWith('INT-') || t.student?.courseType === 'Intern';
+        const isIntern = t.student?.category === 'Intern' || t.student?.id?.startsWith('INT-') || t.student?.courseType === 'Intern';
         const category = isIntern ? 'Intern' : 'Student';
-        const startupName = isIntern ? t.student?.department : undefined;
-        let projectDisplay = t.project?.name || t.projectCode || '—';
-        if (isIntern && (!t.project?.name || t.project?.code === 'GEN-INTERN' || t.project?.code === 'Startup Interns')) {
+        const startupName = isIntern ? (t.student?.startupName || t.student?.department) : undefined;
+        let projectDisplay = t.mentor?.name || 'General';
+        if (isIntern && (!t.mentor?.name || projectDisplay === 'General')) {
           projectDisplay = startupName ? `Startup: ${startupName}` : 'Startup Intern';
         }
 
@@ -615,4 +586,3 @@ export async function resetTestTokens(targetDate?: string, studentIdInput?: stri
     return { success: false, count: 0, message: 'Failed to reset test tokens.' };
   }
 }
-

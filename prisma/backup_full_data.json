@@ -1,0 +1,157 @@
+{
+  "backupDate": "2026-10-05T09:22:44.501Z",
+  "staffUsers": [
+    {
+      "id": "staff-001",
+      "username": "staff",
+      "email": "incubation@sairam.edu.in",
+      "passwordHash": "$2b$10$w09ZkZ7pZ1j3iI2/zD386uvLhHkJgQ0eCgG0nK3zR87m1oZ5l1u4u",
+      "name": "Incubation Centre Staff",
+      "createdAt": "2026-09-28T05:09:43.821Z",
+      "updatedAt": "2026-09-28T05:09:43.821Z"
+    }
+  ],
+  "students": [
+    {
+      "id": "SECP24ES02",
+      "name": "Tharunkumar P",
+      "department": "Electronics and Communication Engineering",
+      "courseType": "Bachelor",
+      "year": 2,
+      "email": "secp24es02@sairamtap.edu.in",
+      "phone": "7305634366",
+      "status": "Active",
+      "createdAt": "2026-10-01T14:02:11.116Z",
+      "updatedAt": "2026-10-01T14:02:11.116Z"
+    },
+    {
+      "id": "SECP24ES01",
+      "name": "Karthick A",
+      "department": "Electronics and Communication Engineering",
+      "courseType": "Bachelor",
+      "year": 2,
+      "email": "secp24es01@sairamtap.edu.in",
+      "phone": "7305634366",
+      "status": "Active",
+      "createdAt": "2026-10-01T14:05:34.705Z",
+      "updatedAt": "2026-10-01T14:05:34.705Z"
+    },
+    {
+      "id": "INT-0488",
+      "name": "Karthik",
+      "department": "SkyRobotics",
+      "courseType": "Intern",
+      "year": 0,
+      "email": "intern.9025670488@incubation.local",
+      "phone": "9025670488",
+      "status": "Active",
+      "createdAt": "2026-10-05T08:59:04.317Z",
+      "updatedAt": "2026-10-05T08:59:04.317Z"
+    }
+  ],
+  "projects": [
+    {
+      "code": "SP_01",
+      "name": "Biogas plant",
+      "description": "biogas plant,ecu,ocu",
+      "status": "Active",
+      "createdAt": "2026-10-01T14:03:50.845Z",
+      "updatedAt": "2026-10-01T14:03:50.845Z"
+    },
+    {
+      "code": "GEN-INTERN",
+      "name": "Startup Interns Cohort",
+      "description": "Incubation Startup Interns & Fellows",
+      "status": "Active",
+      "createdAt": "2026-10-05T09:07:12.190Z",
+      "updatedAt": "2026-10-05T09:07:12.190Z"
+    },
+    {
+      "code": "INC-GENERAL",
+      "name": "Incubation Center Cohort",
+      "description": "General Student Cohort",
+      "status": "Active",
+      "createdAt": "2026-10-05T09:07:52.944Z",
+      "updatedAt": "2026-10-05T09:07:52.944Z"
+    }
+  ],
+  "projectMembers": [
+    {
+      "id": "50290c73-aa1c-4590-98ae-225be2c37d8e",
+      "studentId": "SECP24ES02",
+      "projectCode": "SP_01",
+      "role": "Member"
+    },
+    {
+      "id": "e404603c-14fe-4c11-bb90-c2302879faf4",
+      "studentId": "SECP24ES01",
+      "projectCode": "SP_01",
+      "role": "Member"
+    },
+    {
+      "id": "23a3c43e-2b11-45e1-aa75-f5939971f972",
+      "studentId": "INT-0488",
+      "projectCode": "GEN-INTERN",
+      "role": "Intern"
+    }
+  ],
+  "dailyFoodLists": [
+    {
+      "date": "2026-10-01",
+      "status": "Draft",
+      "finalizedBy": null,
+      "finalizedAt": null,
+      "createdById": "staff-001",
+      "createdAt": "2026-10-01T14:06:24.794Z",
+      "updatedAt": "2026-10-01T14:06:24.794Z"
+    },
+    {
+      "date": "2026-10-04",
+      "status": "Draft",
+      "finalizedBy": null,
+      "finalizedAt": null,
+      "createdById": "staff-001",
+      "createdAt": "2026-10-05T09:00:24.736Z",
+      "updatedAt": "2026-10-05T09:00:24.736Z"
+    },
+    {
+      "date": "2026-10-05",
+      "status": "Draft",
+      "finalizedBy": null,
+      "finalizedAt": null,
+      "createdById": "staff-001",
+      "createdAt": "2026-10-05T09:13:11.865Z",
+      "updatedAt": "2026-10-05T09:13:11.865Z"
+    },
+    {
+      "date": "2026-10-06",
+      "status": "Draft",
+      "finalizedBy": null,
+      "finalizedAt": null,
+      "createdById": "staff-001",
+      "createdAt": "2026-10-05T09:15:21.587Z",
+      "updatedAt": "2026-10-05T09:15:21.587Z"
+    }
+  ],
+  "dailyFoodEligibilities": [
+    {
+      "id": "82d5b924-87c6-4509-87db-f938fdf50413",
+      "date": "2026-10-01",
+      "studentId": "SECP24ES02",
+      "projectCode": "SP_01",
+      "addedBy": "Staff",
+      "status": "Eligible",
+      "createdAt": "2026-10-01T14:06:27.391Z"
+    },
+    {
+      "id": "8ac48952-0287-4aca-9a56-8d0cdef9b751",
+      "date": "2026-10-01",
+      "studentId": "SECP24ES01",
+      "projectCode": "SP_01",
+      "addedBy": "Staff",
+      "status": "Eligible",
+      "createdAt": "2026-10-01T14:06:29.249Z"
+    }
+  ],
+  "foodTokens": []
+}
