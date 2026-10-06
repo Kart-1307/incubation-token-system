@@ -304,6 +304,7 @@ export async function createStudent(data: {
 export async function createIntern(data: {
   name: string;
   phone: string;
+  email?: string;
   startupName: string;
   mentorId?: string;
   mentorCode?: string;
@@ -312,12 +313,34 @@ export async function createIntern(data: {
   const rawPhone = (data.phone || '').trim();
   const cleanPhone = rawPhone.replace(/\D/g, '');
   const startupName = (data.startupName || '').trim() || 'Incubation Startup Intern';
+  const providedEmail = (data.email || '').trim().toLowerCase();
 
   if (!name) {
     return { success: false, message: 'Intern full name is required.' };
   }
   if (cleanPhone.length < 4) {
     return { success: false, message: 'Please provide a valid phone number (at least 4 digits for ID derivation).' };
+  }
+
+  // Validate format and uniqueness if email is provided
+  if (providedEmail) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(providedEmail)) {
+      return { success: false, message: 'Please provide a valid email address.' };
+    }
+
+    const emailConflict = await prisma.student.findFirst({
+      where: {
+        email: providedEmail,
+        status: { not: 'Deleted' },
+      },
+    });
+    if (emailConflict) {
+      return {
+        success: false,
+        message: `Email "${providedEmail}" is already registered (${emailConflict.name} - ${emailConflict.id}).`,
+      };
+    }
   }
 
   const last4 = cleanPhone.slice(-4);
@@ -339,6 +362,7 @@ export async function createIntern(data: {
         finalId = existingWithSamePhone.id;
         const rawMentorId = data.mentorId || data.mentorCode;
         const mentorId = rawMentorId && rawMentorId !== 'UNASSIGNED' ? rawMentorId.trim() : null;
+        const resolvedEmail = providedEmail || existingWithSamePhone.email || `intern.${finalId.toLowerCase()}@incubation.local`;
 
         const updated = await prisma.student.update({
           where: { id: finalId },
@@ -349,6 +373,7 @@ export async function createIntern(data: {
             courseType: 'Intern',
             department: startupName,
             year: 0,
+            email: resolvedEmail,
             phone: cleanPhone,
             status: 'Active',
             mentorId,
@@ -396,7 +421,7 @@ export async function createIntern(data: {
       finalId = `${baseId}-${counter}`;
     }
 
-    const email = `intern.${finalId.toLowerCase()}@incubation.local`;
+    const email = providedEmail || `intern.${finalId.toLowerCase()}@incubation.local`;
 
     const rawMentorId = data.mentorId || data.mentorCode;
     const mentorId = rawMentorId && rawMentorId !== 'UNASSIGNED' ? rawMentorId.trim() : null;

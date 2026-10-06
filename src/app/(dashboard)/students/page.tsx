@@ -87,6 +87,7 @@ export default function Students() {
   });
   const [internForm, setInternForm] = useState({
     name: '',
+    email: '',
     phone: '',
     startupName: '',
     mentorCode: '',
@@ -291,6 +292,15 @@ export default function Students() {
           setFormError('Please enter a valid phone number (at least 4 digits needed for ID).');
           return;
         }
+        if (!internForm.email.trim()) {
+          setFormError('Intern Email Address is required.');
+          return;
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(internForm.email.trim())) {
+          setFormError('Please enter a valid email address (e.g. name@startup.com).');
+          return;
+        }
         if (!internForm.startupName.trim()) {
           setFormError('Startup / Company Name is required.');
           return;
@@ -298,6 +308,7 @@ export default function Students() {
 
         const res = await createIntern({
           name: internForm.name,
+          email: internForm.email,
           phone: internForm.phone,
           startupName: internForm.startupName,
         });
@@ -325,7 +336,7 @@ export default function Students() {
             } catch {}
           }
 
-          setInternForm({ name: '', phone: '', startupName: '', mentorCode: '' });
+          setInternForm({ name: '', email: '', phone: '', startupName: '', mentorCode: '' });
           setIsAddingNewMentorInline(false);
           setInlineMentorName('');
           setInlineMentorDept('');
@@ -551,8 +562,13 @@ export default function Students() {
       setEditFormError('Full Name is required.');
       return;
     }
-    if (!isIntern && !editForm.email.trim()) {
-      setEditFormError('Email is required for college students.');
+    if (!editForm.email.trim()) {
+      setEditFormError('Email Address is required.');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(editForm.email.trim())) {
+      setEditFormError('Please enter a valid email address.');
       return;
     }
 
@@ -1190,6 +1206,17 @@ export default function Students() {
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Email Address *</label>
+                    <input
+                      type="email"
+                      value={internForm.email}
+                      onChange={e => setInternForm(p => ({ ...p, email: e.target.value }))}
+                      placeholder="e.g. praveen@startup.com"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Startup / Company Name *</label>
                     <input
                       type="text"
@@ -1782,6 +1809,18 @@ export default function Students() {
                   )}
                 </div>
               )}
+
+              {/* Email Address */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  value={editForm.email}
+                  onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="e.g. member@sairam.edu.in or intern@startup.com"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
 
               {/* Contact Info */}
               <div className="grid grid-cols-2 gap-3">
