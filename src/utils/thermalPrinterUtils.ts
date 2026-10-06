@@ -14,7 +14,7 @@ export interface PrinterSettings {
 const DEFAULT_SETTINGS: PrinterSettings = {
   paperWidth: '80mm',
   autoPrint: false,
-  includeQrCode: true,
+  includeQrCode: false,
   headerTitle: 'SRI SAIRAM TECHNO INCUBATOR FOUNDATION',
   footerDisclaimer: 'Valid for 1 meal only · Mess Counter Token · Non-transferable',
 };

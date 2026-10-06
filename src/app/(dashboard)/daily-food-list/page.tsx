@@ -6,7 +6,6 @@ import Badge from '@/components/Badge';
 import FoodRequestLetterModal from '@/components/FoodRequestLetterModal';
 import TokenPrintSlip, { type TokenPrintData } from '@/components/TokenPrintSlip';
 import TokenSlipModal from '@/components/TokenSlipModal';
-import PrinterSettingsModal from '@/components/PrinterSettingsModal';
 import {
   getDailyFoodList,
   addStudentToDailyList,
@@ -192,8 +191,6 @@ function DailyFoodListContent() {
   // Print Slip & Modal states
   const [selectedPrintToken, setSelectedPrintToken] = useState<TokenPrintData | null>(null);
   const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
-  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
-  const [testPrintToken, setTestPrintToken] = useState<TokenPrintData | null>(null);
 
   // Datewise logs state
   const [datewiseLogs, setDatewiseLogs] = useState<DatewiseLogSummary[]>([]);
@@ -236,6 +233,11 @@ function DailyFoodListContent() {
   const selectedDateRef = useRef<string>(selectedDate);
   const currentCountRef = useRef<number>(currentList?.entries.length || 0);
   const inFlightScansRef = useRef<Map<string, FoodListEntry>>(new Map());
+  // Mutation tracking refs to eliminate background poll race conditions & UI flicker
+  const pendingDeletionsRef = useRef<Map<string, number>>(new Map()); // studentIdUpper -> timestamp
+  const pendingAdditionsRef = useRef<Map<string, FoodListEntry>>(new Map()); // studentIdUpper -> FoodListEntry
+  const activeMutationsCountRef = useRef<number>(0);
+  const lastMutationTimestampRef = useRef<number>(0);
 
   useEffect(() => {
     selectedDateRef.current = selectedDate;
@@ -466,28 +468,58 @@ function DailyFoodListContent() {
     }
   }, [activeTab, loadLogs]);
 
-  // Adaptive 2-second Micro-Poll to sync multi-operator list updates in background
+  // Coordinated Micro-Poll to sync multi-operator list updates in background without race condition flicker
   useEffect(() => {
+    let abortCtrl: AbortController | null = null;
+
     const pollInterval = setInterval(async () => {
       if (document.hidden) return;
-      // Guard: Do not poll while an in-flight barcode scan is actively writing to DB to prevent race condition flicker
+      // Guard 1: Do not poll while an in-flight barcode scan is actively writing to DB
       if (inFlightScansRef.current.size > 0) return;
+      // Guard 2: Do not poll while any user mutation (add, delete, bulk) is executing
+      if (activeMutationsCountRef.current > 0) return;
+      // Guard 3: Wait at least 3500ms cooldown after the last mutation so DB has fully committed
+      if (Date.now() - lastMutationTimestampRef.current < 3500) return;
 
       const targetDate = selectedDateRef.current;
       const knownCount = currentCountRef.current;
 
       try {
-        const res = await fetch(`/api/food-list-sync?date=${targetDate}&knownCount=${knownCount}`);
+        if (abortCtrl) abortCtrl.abort();
+        abortCtrl = new AbortController();
+
+        const res = await fetch(`/api/food-list-sync?date=${targetDate}&knownCount=${knownCount}`, {
+          signal: abortCtrl.signal,
+        });
         if (!res.ok) return;
         const data = await res.json();
 
+        // Expire old pending deletions (older than 12s)
+        const now = Date.now();
+        for (const [id, time] of pendingDeletionsRef.current.entries()) {
+          if (now - time > 12000) {
+            pendingDeletionsRef.current.delete(id);
+          }
+        }
+
         if (data.changed && data.entries) {
-          // Merge any in-flight scans that haven't appeared in DB yet so they never disappear
-          const serverIds = new Set(data.entries.map((e: any) => e.studentId.toUpperCase()));
-          const uncommitted = Array.from(inFlightScansRef.current.values()).filter(
-            e => !serverIds.has(e.studentId.toUpperCase())
+          // 1. NEVER resurrect an entry that was deleted locally and is in pendingDeletionsRef
+          const serverFiltered = data.entries.filter(
+            (e: any) => !pendingDeletionsRef.current.has(e.studentId.toUpperCase())
           );
-          const mergedEntries = [...uncommitted, ...data.entries];
+          const serverIds = new Set(serverFiltered.map((e: any) => e.studentId.toUpperCase()));
+
+          // 2. ALWAYS preserve entries that were added locally and are in pendingAdditionsRef
+          const uncommittedAdds = Array.from(pendingAdditionsRef.current.values()).filter(
+            e => !serverIds.has(e.studentId.toUpperCase()) && !pendingDeletionsRef.current.has(e.studentId.toUpperCase())
+          );
+
+          // 3. ALWAYS preserve in-flight scans
+          const uncommittedScans = Array.from(inFlightScansRef.current.values()).filter(
+            e => !serverIds.has(e.studentId.toUpperCase()) && !pendingDeletionsRef.current.has(e.studentId.toUpperCase())
+          );
+
+          const mergedEntries = [...uncommittedAdds, ...uncommittedScans, ...serverFiltered];
 
           const updated: FoodListDetails = {
             date: targetDate,
@@ -500,13 +532,19 @@ function DailyFoodListContent() {
           globalDateCache.set(targetDate, updated);
           if (selectedDateRef.current === targetDate) {
             setCurrentList(updated);
+            currentCountRef.current = mergedEntries.length;
             setLoading(false);
           }
         }
-      } catch {}
-    }, 2000);
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+      }
+    }, 4000);
 
-    return () => clearInterval(pollInterval);
+    return () => {
+      clearInterval(pollInterval);
+      if (abortCtrl) abortCtrl.abort();
+    };
   }, []);
 
   // Process Quick Scan with Instant In-Memory Optimistic UI Insertion (<5ms)
@@ -559,8 +597,12 @@ function DailyFoodListContent() {
         status: 'Eligible',
       };
 
-      // Register in inFlightScansRef so background sync poll never removes it
+      // Register in inFlightScansRef and pendingAdditionsRef so background sync poll never removes it
+      pendingDeletionsRef.current.delete(code);
       inFlightScansRef.current.set(code, newEntry);
+      pendingAdditionsRef.current.set(code, newEntry);
+      activeMutationsCountRef.current++;
+      lastMutationTimestampRef.current = Date.now();
 
       setCurrentList(prev => {
         const existing = prev?.entries || [];
@@ -573,6 +615,7 @@ function DailyFoodListContent() {
           entries: [newEntry, ...existing],
         };
         globalDateCache.set(selectedDate, updated);
+        currentCountRef.current = updated.entries.length;
         return updated;
       });
 
@@ -598,25 +641,30 @@ function DailyFoodListContent() {
       try {
         const res = await scanStudentIntoDailyFoodList(code, selectedDate, 'Barcode Gun');
         inFlightScansRef.current.delete(code);
+        lastMutationTimestampRef.current = Date.now();
 
         if (res.success) {
           if (res.entry) {
+            pendingAdditionsRef.current.set(code, res.entry);
             // Update in place with refined server entry (e.g. normalized department/project)
             setCurrentList(prev => {
               if (!prev) return prev;
               const updatedEntries = prev.entries.map(e => e.studentId === code ? { ...e, ...res.entry } : e);
               const updated = { ...prev, entries: updatedEntries };
               globalDateCache.set(selectedDate, updated);
+              currentCountRef.current = updated.entries.length;
               return updated;
             });
           }
         } else if (!res.alreadyAdded) {
+          pendingAdditionsRef.current.delete(code);
           // Revert optimistic insertion if invalid student or server error
           setCurrentList(prev => {
             if (!prev) return prev;
             const filtered = prev.entries.filter(e => e.studentId !== code);
             const reverted = { ...prev, entries: filtered };
             globalDateCache.set(selectedDate, reverted);
+            currentCountRef.current = reverted.entries.length;
             return reverted;
           });
           playChime('error');
@@ -624,7 +672,11 @@ function DailyFoodListContent() {
         }
       } catch (err) {
         inFlightScansRef.current.delete(code);
+        pendingAdditionsRef.current.delete(code);
         console.error('Background scan error:', err);
+      } finally {
+        activeMutationsCountRef.current = Math.max(0, activeMutationsCountRef.current - 1);
+        lastMutationTimestampRef.current = Date.now();
       }
     },
     [selectedDate, currentList, studentRegistry, projectRegistry, playChime]
@@ -725,7 +777,9 @@ function DailyFoodListContent() {
 
   const handleAddStudent = async () => {
     if (!foundStudent || foundStudent === 'not-found') return;
-    if (currentList?.entries.some(e => e.studentId === foundStudent.id)) {
+    const studentIdUpper = foundStudent.id.toUpperCase();
+
+    if (currentList?.entries.some(e => e.studentId.toUpperCase() === studentIdUpper)) {
       showToast(`${foundStudent.category || 'Member'} ${foundStudent.id} is already in the list for ${selectedDate}.`);
       setShowAddStudent(false);
       setFoundStudent(null);
@@ -735,59 +789,155 @@ function DailyFoodListContent() {
 
     const isIntern = foundStudent.category === 'Intern' || foundStudent.courseType === 'Intern' || foundStudent.id.startsWith('INT-');
     const defaultCode = foundStudent.mentorId || foundStudent.mentorCode || undefined;
-    const res = await addStudentToDailyList(selectedDate, foundStudent.id, defaultCode);
-    if (res.success) {
-      showToast(res.message);
-      // Instant optimistic UI addition (0ms)
-      const addedEntry: FoodListEntry = {
-        studentId: foundStudent.id,
-        studentName: foundStudent.name,
-        department: foundStudent.department,
-        year: typeof foundStudent.year === 'number' ? foundStudent.year : parseInt(foundStudent.year || '0', 10) || 0,
-        mentorId: defaultCode,
-        mentorName: foundStudent.mentorName || 'Unassigned',
-        category: isIntern ? 'Intern' : 'Student',
-        startupName: isIntern ? foundStudent.department : undefined,
-        projectCode: isIntern ? 'GEN-INTERN' : (foundStudent.mentorCode || 'INC-GENERAL'),
-        projectName: isIntern ? (foundStudent.department ? `Startup: ${foundStudent.department}` : 'Startup Intern') : (foundStudent.mentorName ? `Mentor: ${foundStudent.mentorName}` : 'Incubation Member'),
-        addedBy: 'Staff Portal',
-        status: 'Approved',
+
+    // 1. Create entry for instant optimistic UI addition (0ms)
+    const addedEntry: FoodListEntry = {
+      studentId: foundStudent.id,
+      studentName: foundStudent.name,
+      department: foundStudent.department,
+      year: typeof foundStudent.year === 'number' ? foundStudent.year : parseInt(foundStudent.year || '0', 10) || 0,
+      mentorId: defaultCode,
+      mentorName: foundStudent.mentorName || 'Unassigned',
+      category: isIntern ? 'Intern' : 'Student',
+      startupName: isIntern ? foundStudent.department : undefined,
+      projectCode: isIntern ? 'GEN-INTERN' : (foundStudent.mentorCode || 'INC-GENERAL'),
+      projectName: isIntern ? (foundStudent.department ? `Startup: ${foundStudent.department}` : 'Startup Intern') : (foundStudent.mentorName ? `Mentor: ${foundStudent.mentorName}` : 'Incubation Member'),
+      addedBy: 'Staff Portal',
+      status: 'Approved',
+    };
+
+    // 2. Lock mutation & record pending addition
+    pendingDeletionsRef.current.delete(studentIdUpper);
+    pendingAdditionsRef.current.set(studentIdUpper, addedEntry);
+    activeMutationsCountRef.current++;
+    lastMutationTimestampRef.current = Date.now();
+
+    // 3. Optimistic state update
+    setCurrentList(prev => {
+      if (!prev) return prev;
+      const filtered = (prev.entries || []).filter(e => e.studentId.toUpperCase() !== studentIdUpper);
+      const updated: FoodListDetails = {
+        ...prev,
+        entries: [addedEntry, ...filtered],
       };
+      globalDateCache.set(selectedDate, updated);
+      currentCountRef.current = updated.entries.length;
+      return updated;
+    });
+
+    setShowAddStudent(false);
+    setFoundStudent(null);
+    setSearchId('');
+
+    // 4. Server persistence
+    try {
+      const res = await addStudentToDailyList(selectedDate, foundStudent.id, defaultCode);
+      lastMutationTimestampRef.current = Date.now();
+      if (res.success) {
+        showToast(res.message);
+        setTimeout(() => {
+          pendingAdditionsRef.current.delete(studentIdUpper);
+        }, 5000);
+      } else {
+        pendingAdditionsRef.current.delete(studentIdUpper);
+        setCurrentList(prev => {
+          if (!prev) return prev;
+          const reverted: FoodListDetails = {
+            ...prev,
+            entries: (prev.entries || []).filter(e => e.studentId.toUpperCase() !== studentIdUpper),
+          };
+          globalDateCache.set(selectedDate, reverted);
+          currentCountRef.current = reverted.entries.length;
+          return reverted;
+        });
+        showToast(`❌ ${res.message}`);
+      }
+    } catch (err) {
+      pendingAdditionsRef.current.delete(studentIdUpper);
       setCurrentList(prev => {
         if (!prev) return prev;
-        const updated: FoodListDetails = {
+        const reverted: FoodListDetails = {
           ...prev,
-          entries: [addedEntry, ...(prev.entries || []).filter(e => e.studentId !== foundStudent.id)],
+          entries: (prev.entries || []).filter(e => e.studentId.toUpperCase() !== studentIdUpper),
         };
-        globalDateCache.set(selectedDate, updated);
-        return updated;
+        globalDateCache.set(selectedDate, reverted);
+        currentCountRef.current = reverted.entries.length;
+        return reverted;
       });
-
-      setShowAddStudent(false);
-      setFoundStudent(null);
-      setSearchId('');
-      loadData(selectedDate);
-    } else {
-      showToast(res.message);
+      showToast('Server error while adding attendee to food list.');
+    } finally {
+      activeMutationsCountRef.current = Math.max(0, activeMutationsCountRef.current - 1);
+      lastMutationTimestampRef.current = Date.now();
     }
   };
 
   const handleRemoveEntry = async (studentId: string) => {
-    // Instant optimistic UI removal (0ms)
+    const studentIdUpper = studentId.toUpperCase();
+    const existingEntry = currentList?.entries.find(e => e.studentId.toUpperCase() === studentIdUpper);
+
+    // 1. Lock mutation & record pending deletion
+    pendingAdditionsRef.current.delete(studentIdUpper);
+    inFlightScansRef.current.delete(studentIdUpper);
+    pendingDeletionsRef.current.set(studentIdUpper, Date.now());
+    activeMutationsCountRef.current++;
+    lastMutationTimestampRef.current = Date.now();
+
+    // 2. Instant optimistic UI removal (0ms)
     setCurrentList(prev => {
       if (!prev) return prev;
+      const filtered = (prev.entries || []).filter(e => e.studentId.toUpperCase() !== studentIdUpper);
       const updated: FoodListDetails = {
         ...prev,
-        entries: (prev.entries || []).filter(e => e.studentId !== studentId),
+        entries: filtered,
       };
       globalDateCache.set(selectedDate, updated);
+      currentCountRef.current = updated.entries.length;
       return updated;
     });
 
-    const res = await removeStudentFromDailyList(selectedDate, studentId);
-    showToast(res.message);
-    if (!res.success) {
-      await loadData(selectedDate);
+    // 3. Server deletion
+    try {
+      const res = await removeStudentFromDailyList(selectedDate, studentId);
+      lastMutationTimestampRef.current = Date.now();
+      if (res.success) {
+        showToast(res.message);
+        setTimeout(() => {
+          pendingDeletionsRef.current.delete(studentIdUpper);
+        }, 6000);
+      } else {
+        pendingDeletionsRef.current.delete(studentIdUpper);
+        if (existingEntry) {
+          setCurrentList(prev => {
+            if (!prev) return prev;
+            const restored: FoodListDetails = {
+              ...prev,
+              entries: [existingEntry, ...(prev.entries || []).filter(e => e.studentId.toUpperCase() !== studentIdUpper)],
+            };
+            globalDateCache.set(selectedDate, restored);
+            currentCountRef.current = restored.entries.length;
+            return restored;
+          });
+        }
+        showToast(`⚠️ ${res.message}`);
+      }
+    } catch (err) {
+      pendingDeletionsRef.current.delete(studentIdUpper);
+      if (existingEntry) {
+        setCurrentList(prev => {
+          if (!prev) return prev;
+          const restored: FoodListDetails = {
+            ...prev,
+            entries: [existingEntry, ...(prev.entries || []).filter(e => e.studentId.toUpperCase() !== studentIdUpper)],
+          };
+          globalDateCache.set(selectedDate, restored);
+          currentCountRef.current = restored.entries.length;
+          return restored;
+        });
+      }
+      showToast('Server error while removing student.');
+    } finally {
+      activeMutationsCountRef.current = Math.max(0, activeMutationsCountRef.current - 1);
+      lastMutationTimestampRef.current = Date.now();
     }
   };
 
@@ -802,6 +952,8 @@ function DailyFoodListContent() {
 
   const handleAddBulkStudents = async () => {
     if (bulkSelected.length === 0 || !bulkMentor) return;
+
+    const selectedUppers = bulkSelected.map(id => id.toUpperCase());
 
     // Instant optimistic UI addition for bulk selection (0ms)
     const addedEntries: FoodListEntry[] = bulkSelected.map(stId => {
@@ -822,22 +974,49 @@ function DailyFoodListContent() {
         status: 'Approved',
       };
     });
+
+    // Lock mutation & record pending additions
+    selectedUppers.forEach(uId => {
+      pendingDeletionsRef.current.delete(uId);
+    });
+    addedEntries.forEach(entry => {
+      pendingAdditionsRef.current.set(entry.studentId.toUpperCase(), entry);
+    });
+    activeMutationsCountRef.current++;
+    lastMutationTimestampRef.current = Date.now();
+
     setCurrentList(prev => {
       if (!prev) return prev;
       const updated: FoodListDetails = {
         ...prev,
-        entries: [...addedEntries, ...(prev.entries || []).filter(e => !bulkSelected.includes(e.studentId))],
+        entries: [...addedEntries, ...(prev.entries || []).filter(e => !selectedUppers.includes(e.studentId.toUpperCase()))],
       };
       globalDateCache.set(selectedDate, updated);
+      currentCountRef.current = updated.entries.length;
       return updated;
     });
 
-    const res = await addBulkByMentorToDailyList(selectedDate, bulkSelected, bulkMentor);
-    showToast(res.message);
+    const targets = [...bulkSelected];
+    const mentorTarget = bulkMentor;
     setBulkSelected([]);
     setBulkMentor('');
     setShowBulkAdd(false);
-    loadData(selectedDate);
+
+    try {
+      const res = await addBulkByMentorToDailyList(selectedDate, targets, mentorTarget);
+      lastMutationTimestampRef.current = Date.now();
+      showToast(res.message);
+      setTimeout(() => {
+        selectedUppers.forEach(uId => pendingAdditionsRef.current.delete(uId));
+      }, 5000);
+    } catch (err) {
+      selectedUppers.forEach(uId => pendingAdditionsRef.current.delete(uId));
+      showToast('Server error during bulk addition.');
+      loadData(selectedDate);
+    } finally {
+      activeMutationsCountRef.current = Math.max(0, activeMutationsCountRef.current - 1);
+      lastMutationTimestampRef.current = Date.now();
+    }
   };
 
   // Pagination & Search states for 100+ student handling
@@ -888,7 +1067,7 @@ function DailyFoodListContent() {
   return (
     <div className="space-y-6">
       {/* Thermal Receipt Print Slip Portal */}
-      <TokenPrintSlip token={testPrintToken || selectedPrintToken} />
+      <TokenPrintSlip token={selectedPrintToken} />
 
       {/* Interactive Token Slip Modal */}
       <TokenSlipModal
@@ -897,16 +1076,6 @@ function DailyFoodListContent() {
         onClose={() => {
           setIsSlipModalOpen(false);
           setSelectedPrintToken(null);
-        }}
-      />
-
-      {/* Printer Configuration Modal */}
-      <PrinterSettingsModal
-        isOpen={isPrinterModalOpen}
-        onClose={() => setIsPrinterModalOpen(false)}
-        onTriggerTestPrint={(testToken) => {
-          setTestPrintToken(testToken);
-          setTimeout(() => window.print(), 250);
         }}
       />
 
@@ -921,17 +1090,6 @@ function DailyFoodListContent() {
           </div>
 
           <div className="flex items-center gap-2.5 self-start sm:self-auto">
-            {/* Quick Printer Setup & Diagnostic Button */}
-            <button
-              type="button"
-              onClick={() => setIsPrinterModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
-              title="Thermal Printer Settings & Diagnostic Test Slip"
-            >
-              <span>🖨️</span>
-              <span>Printer Settings</span>
-            </button>
-
             {/* Segmented Subtab Switcher (Consolidated 2 Tabs) */}
             <div className="inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80">
               <button

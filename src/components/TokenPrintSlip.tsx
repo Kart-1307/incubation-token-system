@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getMealSession, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
-import { getPrinterSettings, generateQrCodeDataUrl, type PrinterSettings } from '@/utils/thermalPrinterUtils';
+import { getPrinterSettings, type PrinterSettings } from '@/utils/thermalPrinterUtils';
 
 export interface TokenPrintData {
   tokenNumber: string;
@@ -29,8 +29,6 @@ interface TokenPrintSlipProps {
 export default function TokenPrintSlip({ token, onClose, autoPrint = false }: TokenPrintSlipProps) {
   const [mounted, setMounted] = useState(false);
   const [settings, setSettings] = useState<PrinterSettings>(() => getPrinterSettings());
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
-  const [qrReady, setQrReady] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -48,44 +46,6 @@ export default function TokenPrintSlip({ token, onClose, autoPrint = false }: To
       window.removeEventListener('thermal-printer-settings-changed', handleSettingsChange);
     };
   }, []);
-
-  // Generate QR Code whenever token or settings change
-  useEffect(() => {
-    if (!token) {
-      setQrCodeUrl('');
-      setQrReady(false);
-      return;
-    }
-
-    if (!settings.includeQrCode) {
-      setQrCodeUrl('');
-      setQrReady(true);
-      return;
-    }
-
-    let isSubscribed = true;
-    setQrReady(false);
-
-    // Encode token validation payload into QR code
-    const payload = JSON.stringify({
-      tok: token.tokenNumber,
-      sid: token.studentId,
-      ses: token.session || getMealSession(),
-      dt: token.date,
-    });
-
-    const qrSize = settings.paperWidth === '58mm' ? 110 : 135;
-    generateQrCodeDataUrl(payload, qrSize).then((url) => {
-      if (isSubscribed) {
-        setQrCodeUrl(url);
-        setQrReady(true);
-      }
-    });
-
-    return () => {
-      isSubscribed = false;
-    };
-  }, [token, settings.includeQrCode, settings.paperWidth]);
 
   // Handle auto-print once mounted
   useEffect(() => {

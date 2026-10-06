@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { formatISTDateDMY, formatISTTime, getMealSession } from '@/utils/timeUtils';
-import { generateQrCodeDataUrl, getPrinterSettings } from '@/utils/thermalPrinterUtils';
+import { getPrinterSettings } from '@/utils/thermalPrinterUtils';
 import TokenPrintSlip, { type TokenPrintData } from './TokenPrintSlip';
 
 export interface TokenSlipModalProps {
@@ -12,24 +11,7 @@ export interface TokenSlipModalProps {
 }
 
 export default function TokenSlipModal({ token, isOpen, onClose }: TokenSlipModalProps) {
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const settings = getPrinterSettings();
-
-  useEffect(() => {
-    if (!token || !isOpen) {
-      setQrCodeUrl('');
-      return;
-    }
-
-    const payload = JSON.stringify({
-      tok: token.tokenNumber,
-      sid: token.studentId,
-      ses: token.session || getMealSession(),
-      dt: token.date,
-    });
-
-    generateQrCodeDataUrl(payload, 140).then(setQrCodeUrl);
-  }, [token, isOpen]);
 
   if (!isOpen || !token) return null;
 

@@ -42,13 +42,16 @@ export async function GET(req: NextRequest) {
     ]);
 
     const entries = eligibilities.map((e: any) => {
+      const isIntern = e.student?.category === 'Intern' || e.student?.courseType === 'Intern' || e.studentId.startsWith('INT-');
       const mentorName = e.mentor?.name || 'Unassigned';
       return {
         studentId: e.studentId,
         studentName: e.student?.name || e.studentId,
-        department: normalizeDepartmentName(e.student?.department),
+        category: (isIntern ? 'Intern' : 'Student') as 'Student' | 'Intern',
+        department: isIntern ? (e.student?.startupName || e.student?.department || 'Startup Intern') : normalizeDepartmentName(e.student?.department),
+        startupName: isIntern ? (e.student?.startupName || e.student?.department) : undefined,
         year: e.student?.year || 0,
-        mentorId: e.mentorId || 'UNASSIGNED',
+        mentorId: e.mentorId || undefined,
         mentorName,
         projectCode: e.mentorId || 'UNASSIGNED',
         projectName: mentorName,

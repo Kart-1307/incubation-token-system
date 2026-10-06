@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import TokenPrintSlip, { type TokenPrintData } from '@/components/TokenPrintSlip';
-import PrinterSettingsModal from '@/components/PrinterSettingsModal';
+import TokenPrintSlip from '@/components/TokenPrintSlip';
 import TokenSlipModal from '@/components/TokenSlipModal';
-import { generateQrCodeDataUrl } from '@/utils/thermalPrinterUtils';
 import { verifyStudentScan, issueFoodToken, type VerificationResult } from '@/actions/tokenActions';
 import { getDailyFoodList, type FoodListDetails } from '@/actions/foodListActions';
 import { getMealSession, getTodayISTDateString, getPreviousISTDateString, formatISTDateDMY, formatISTTime } from '@/utils/timeUtils';
@@ -48,10 +46,7 @@ export default function ScanToken() {
   const [foodListInfo, setFoodListInfo] = useState<FoodListDetails | null>(null);
   const [yesterdayFoodListInfo, setYesterdayFoodListInfo] = useState<FoodListDetails | null>(null);
   const [dbStudents, setDbStudents] = useState<StudentRecord[]>([]);
-  const [testPrintToken, setTestPrintToken] = useState<TokenPrintData | null>(null);
-  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
   const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
-  const [previewQrCode, setPreviewQrCode] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('hardware_scanner_sound');
@@ -298,27 +293,6 @@ export default function ScanToken() {
     playTerminalChime('success');
   };
 
-  useEffect(() => {
-    if (generatedToken) {
-      const payload = JSON.stringify({
-        tok: generatedToken.tokenNumber,
-        sid: generatedToken.studentId,
-        ses: generatedToken.session,
-        dt: generatedToken.date,
-      });
-      generateQrCodeDataUrl(payload, 120).then(setPreviewQrCode);
-    } else {
-      setPreviewQrCode('');
-    }
-  }, [generatedToken]);
-
-  const handleTriggerTestPrint = (testToken: TokenPrintData) => {
-    setTestPrintToken(testToken);
-    setTimeout(() => {
-      window.print();
-    }, 250);
-  };
-
   const reset = () => {
     setScannedId('');
     setState('idle');
@@ -326,14 +300,13 @@ export default function ScanToken() {
     setProjectName('');
     setMessage('');
     setGeneratedToken(null);
-    setTestPrintToken(null);
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Portal Container for Thermal Receipt Printing */}
-      <TokenPrintSlip token={testPrintToken || generatedToken} />
+      <TokenPrintSlip token={generatedToken} />
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -350,16 +323,6 @@ export default function ScanToken() {
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span>⚡ Scanner Active</span>
           </span>
-
-          <button
-            type="button"
-            onClick={() => setIsPrinterModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
-            title="Thermal Printer Settings & Diagnostic Test Slip"
-          >
-            <span>🖨️</span>
-            <span>Printer Settings</span>
-          </button>
 
           <button
             type="button"
@@ -842,14 +805,6 @@ export default function ScanToken() {
                 </div>
               </div>
 
-              {/* Scannable Verification QR Code in Preview */}
-              {previewQrCode && (
-                <div className="my-2 flex flex-col items-center justify-center">
-                  <img src={previewQrCode} alt="QR Preview" className="w-20 h-20 object-contain" />
-                  <div className="text-[8px] text-slate-400 font-mono mt-0.5">SCAN AT MESS COUNTER</div>
-                </div>
-              )}
-
               <div className="text-center text-[10px] text-slate-500 pt-1 border-t border-dashed border-slate-200">
                 <div>Present this slip at mess counter</div>
                 <div>Valid for 1 meal only · Non-transferable</div>
@@ -1084,13 +1039,6 @@ export default function ScanToken() {
           </button>
         </div>
       )}
-
-      {/* Printer Configuration Modal */}
-      <PrinterSettingsModal
-        isOpen={isPrinterModalOpen}
-        onClose={() => setIsPrinterModalOpen(false)}
-        onTriggerTestPrint={handleTriggerTestPrint}
-      />
 
       {/* Slip Modal Preview */}
       <TokenSlipModal
